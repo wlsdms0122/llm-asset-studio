@@ -1,0 +1,20 @@
+# The specification is `open-package spec`
+
+[open-package]
+version = "1.0.0"
+
+[package]
+name = "asset-studio"
+version = "0.1.0"
+description = "Makes image styles with the user in conversation and generates images in them through OpenRouter, with a web studio over the same records"
+requires = ["python3"]
+
+[command]
+# Every command runs inside the workspace, ~/.config/asset-studio or $ASSET_STUDIO_HOME (see source/engine/workspace.py).
+studio = "python3 source/engine/server.py"
+session = "python3 source/engine/session.py"
+generate = "python3 source/engine/generate.py"
+style = "python3 source/engine/style.py"
+sheet = "python3 source/engine/sheet.py"
+key = "python3 source/engine/workspace.py key"
+verify = "python3 source/verify.py"
