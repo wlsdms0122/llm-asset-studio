@@ -17,7 +17,8 @@ const ICONS = {
   down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   previous: '<path d="m15 18-6-6 6-6"/>',
-  next: '<path d="m9 18 6-6-6-6"/>'
+  next: '<path d="m9 18 6-6-6-6"/>',
+  send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'
 };
 
 const $ = id => document.getElementById(id);
@@ -85,6 +86,29 @@ function listRow({ title, detail = null, aside = null, onClick = null, current =
 
 function rowList(rows) {
   return h("div", { class: "rows" }, rows);
+}
+
+// ---------- composer ----------
+
+// The message box under a conversation: attachments above the text, an attach button before it, send after it.
+// The text grows with what is written, and Cmd or Ctrl+Enter sends. node.send is the send button, for the page to enable.
+function composer({ value = "", placeholder = "", sendTitle, onInput = null, onSend, attach = null, attachments = [] }) {
+  const input = h("textarea", { rows: 1, placeholder, value });
+  const send = h("button", { class: "button primary icon-only composer-send", type: "button", title: sendTitle, "aria-label": sendTitle, html: icon("send"), onclick: onSend });
+  const fit = () => { input.style.height = "auto"; input.style.height = `${input.scrollHeight}px`; };
+  input.addEventListener("input", () => { fit(); if (onInput) onInput(input.value); });
+  input.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    if (!send.disabled) send.click();
+  });
+  const node = h("div", { class: "composer" }, [
+    attachments.length ? h("div", { class: "thumbs" }, attachments) : null,
+    h("div", { class: "composer-row" }, [attach, input, send])
+  ]);
+  node.send = send;
+  requestAnimationFrame(fit);
+  return node;
 }
 
 // ---------- labels ----------

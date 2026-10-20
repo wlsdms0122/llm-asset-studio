@@ -6,7 +6,7 @@ The web studio is built from one set of tokens and components so every screen be
 
 - Icons come from Lucide (lucide.dev, ISC license); copy a new one's paths into `ICONS` in `ui.js`, on its 24 by 24 grid.
 - The chrome is neutral (grays, one blue accent) so the images' own colors read true.
-- One primary action per panel, at the bottom right of the panel; everything else is secondary or ghost.
+- In a session, what the user writes is sent from the composer docked under the stage, as in a chat app; its send button is the one primary action. The panel's buttons move between stages (`success`) or are secondary. Outside a session, a panel has one primary action at its bottom right.
 - Actions on an image are icons over the image, shown on hover (`tool`). Actions on a page are labeled buttons.
 - Labels are short Korean nouns or verbs. A title line says what to do; help text appears only where something can go wrong.
 - An image is shown either at its own ratio (`imageFrame` natural: boards, candidates, the lightbox) or cropped to a square cell (`imageFrame` fill: grids of many images, cards). Grids always use square cells so rows line up.
@@ -28,8 +28,9 @@ Dark mode redefines the color tokens only.
 
 | component | use for |
 |---|---|
-| `button(label, { variant, small, grow, iconName })` | page and panel actions; variant `primary` (one per panel), `success` (moving a stage forward: 샘플, 확정, 추가), `danger` (deleting), `ghost`, or none |
+| `button(label, { variant, small, grow, iconName })` | page and panel actions; variant `primary` (one per screen), `success` (moving a stage forward: 샘플, 확정, 추가), `danger` (deleting), `ghost`, or none |
 | `iconButton(icon, title, onClick)` | a panel action with a well-known icon (attach, new) |
+| `composer({ value, placeholder, sendTitle, onInput, onSend, attach, attachments })` | the message box docked under a conversation or a board: attachments above the text, attach before it, send after it; grows with the text, Cmd+Enter sends, `node.send` is the send button |
 | `uploadButton(title, onFiles)` | picking image files |
 | `tool(icon, title, onClick, { href, download, on, quiet })` | actions over an image or a list row |
 | `pill(text, { tone, dot, small })` | status: `accent` for in progress or my turn, `success` for confirmed |

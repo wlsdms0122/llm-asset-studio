@@ -78,13 +78,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .facts-list dt { color: var(--fg-muted); }
 .facts-list dd { margin: 0; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-
-/* The composer sits at the bottom of the panel: the text box, then the attachments under it. */
-.composer { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
-.composer textarea { height: 132px; }
-.composer .hint { display: flex; justify-content: space-between; color: var(--fg-faint); font-size: var(--text-xs); }
-
-.stage { position: relative; min-width: 0; overflow-y: auto; }
+/* The stage scrolls; the composer stays docked under it, as wide as the stage's content. */
+.stage-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.stage { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
+.dock { padding: 0 var(--space-8) var(--space-5); }
+.dock:empty { display: none; }
+.dock > .composer { max-width: 976px; margin: 0 auto; }
 .stage-inner { max-width: 1040px; margin: 0 auto; padding: 28px var(--space-8) 64px; }
 .latest { position: sticky; bottom: var(--space-5); display: flex; align-items: center; gap: 6px; margin: -48px auto 0; height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--fg); color: var(--bg); font-size: var(--text-sm); font-weight: 600; box-shadow: var(--shadow-md); cursor: pointer; }
 .latest svg.icon { width: 16px; height: 16px; }
@@ -150,8 +149,10 @@ body.resizing { cursor: col-resize; user-select: none; }
   .page { padding: var(--space-6) var(--space-4) 48px; }
   .workspace { grid-template-columns: 1fr; height: auto; }
   .panel { order: 2; border-right: 0; border-top: 1px solid var(--line); }
+  .stage-column { order: 1; }
+  .dock { position: sticky; bottom: 0; z-index: 5; padding: var(--space-3) var(--space-4); background: var(--bg); }
   .panel-resize { display: none; }
-  .stage { order: 1; overflow: visible; }
+  .stage { overflow: visible; }
   .stage-inner { padding: var(--space-5) var(--space-4) var(--space-8); }
   .entry { grid-template-columns: 1fr; }
   .entry-info { height: auto; min-height: 0; }

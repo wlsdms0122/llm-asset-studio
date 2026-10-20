@@ -407,9 +407,12 @@ function renderStyle() {
         h("div", { class: "panel-actions", id: "panel-actions" }),
         h("div", { class: "panel-resize", id: "panel-resize", title: "드래그해서 너비 조절" })
       ]),
-      h("section", { class: "stage", id: "stage", onscroll: syncLatestButton }, [
-        h("div", { class: "stage-inner", id: "stage-inner" }),
-        h("button", { class: "latest", id: "latest", type: "button", hidden: true, html: `${icon("down")}<span>새 메시지</span>`, onclick: () => scrollToLatest(true) })
+      h("div", { class: "stage-column" }, [
+        h("section", { class: "stage", id: "stage", onscroll: syncLatestButton }, [
+          h("div", { class: "stage-inner", id: "stage-inner" }),
+          h("button", { class: "latest", id: "latest", type: "button", hidden: true, html: `${icon("down")}<span>새 메시지</span>`, onclick: () => scrollToLatest(true) })
+        ]),
+        h("div", { class: "dock", id: "dock" })
       ])
     ]));
     bindResize();
@@ -499,6 +502,7 @@ function renderPanelBody() {
   const current = view();
   const body = $("panel-body");
   const actions = $("panel-actions");
+  fill($("dock"), );
   if (!data.session) return renderIdlePanel(body, actions);
   if (!current) {
     fill(body, workingNote(data.session.kind === "model" ? "이 모델에 맞춘 프롬프트 가이드를 만드는 중" : "준비하고 있어요"));
@@ -630,20 +634,18 @@ async function addModel() {
   if (model) openSession("model", model);
 }
 
-// The bottom of the panel: the text box, then the images attached to this answer under it.
-function composer(key, placeholder, { attaching = true, hint = "보내기", onInput = null } = {}) {
-  const input = h("textarea", { class: "text-input", placeholder, value: draft[key] });
-  input.addEventListener("input", () => { draft[key] = input.value; if (onInput) onInput(); });
-  input.addEventListener("keydown", event => {
-    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
-    event.preventDefault();
-    const primary = $("panel-actions").querySelector(".button.primary");
-    if (primary && !primary.disabled) primary.click();
-  });
+// The message box under the stage: the images attached to this answer, the text, and the button that sends it.
+function answerBox(key, placeholder, { attaching = true, sendTitle, onSend, onInput = null }) {
   const current = view();
-  const attached = attaching && current.attachments.length ? h("div", { class: "thumbs" }, current.attachments.map(path => thumb(path, { remove: () => detach(path) }))) : null;
-  return h("div", { class: "composer" }, [input, attached, h("div", { class: "hint" }, [h("span", { text: attaching ? "이미지를 첨부하면 이 답과 함께 보내져요" : "" }), h("span", { text: `⌘↵ ${hint}` })])]);
+  return composer({
+    value: draft[key], placeholder, sendTitle: `${sendTitle} (⌘↵)`, onSend,
+    onInput: value => { draft[key] = value; if (onInput) onInput(); },
+    attach: attaching ? attachButton() : null,
+    attachments: attaching ? current.attachments.map(path => thumb(path, { remove: () => detach(path) })) : []
+  });
 }
+
+const sendButton = () => document.querySelector("#dock .composer-send");
 
 function attachButton() {
   return uploadButton("이미지 첨부", async files => {
@@ -652,7 +654,7 @@ function attachButton() {
       catch (error) { toast(error.message, "error"); }
     }
     await load();
-  });
+  }, { variant: "ghost" });
 }
 
 async function detach(path) {
@@ -665,73 +667,72 @@ function discoverPanel(current, body, actions) {
   const imageTalk = data.session.kind === "generate";
   const written = imageTalk ? current.brief : current.spec;
   const lead = current.candidates.length ? "마음에 드는 이미지를 고르고, 이미지마다 메모를 남길 수 있어요." : written ? `제가 정리한 ${imageTalk ? "브리프와" : "설명과"} 다르면 편하게 고쳐 주세요.` : null;
-  const send = button("보내기", { variant: "primary", grow: true, onClick: () => submit(null) });
   const next = imageTalk ? ["생성", "generate"] : ["샘플", "sample"];
   fill(body,
     h("h2", { text: imageTalk ? (written ? "브리프가 맞는지 봐 주세요" : "어떤 이미지가 필요한지 알려 주세요") : written ? "설명이 맞는지 봐 주세요" : "원하는 스타일을 알려 주세요" }),
-    lead ? h("p", { class: "lead", text: lead }) : null,
-    composer("comment", imageTalk ? "예: 앱 아이콘인데 무엇을 그릴지 아직 모르겠어요" : "예: 조금 더 부드럽고 단순했으면 좋겠어요", { onInput: syncSend })
+    lead ? h("p", { class: "lead", text: lead }) : null
   );
-  fill(actions, attachButton(), send, written ? button(next[0], { variant: "success", onClick: () => submit(next[1]) }) : null);
+  fill(actions, written ? button(next[0], { variant: "success", grow: true, onClick: () => submit(next[1]) }) : null);
+  fill($("dock"), answerBox("comment", imageTalk ? "예: 앱 아이콘인데 무엇을 그릴지 아직 모르겠어요" : "예: 조금 더 부드럽고 단순했으면 좋겠어요", { sendTitle: "보내기", onSend: () => submit(null), onInput: syncSend }));
   syncSend();
 }
 
 // A discover answer can be words, picks, notes, or attachments; any one of them is enough to send.
 function syncSend() {
-  const send = kind() === "discover" ? $("panel-actions").querySelector(".button.primary") : null;
+  const send = kind() === "discover" ? sendButton() : null;
   if (send) send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !view().attachments.length;
 }
 
 function samplePanel(current, body, actions) {
-  const generate = button("그리기", { variant: "primary", grow: true, onClick: () => submit("request") });
-  const update = () => { generate.disabled = !draft.request.trim(); };
+  const box = answerBox("request", "예: 비 오는 날 창가에 놓인 머그잔", { sendTitle: "그리기", onSend: () => submit("request"), onInput: () => update() });
+  const update = () => { box.send.disabled = !draft.request.trim(); };
   fill(body,
     h("h2", { text: "이 스타일로 그려 보세요" }),
-    h("p", { class: "lead", text: current.unit_cost != null ? `한 장에 ${money(current.unit_cost)}` : "적은 것을 한 장씩 그려 드려요." }),
-    composer("request", "예: 비 오는 날 창가에 놓인 머그잔", { onInput: update, hint: "그리기" })
+    h("p", { class: "lead", text: current.unit_cost != null ? `한 장에 ${money(current.unit_cost)}` : "적은 것을 한 장씩 그려 드려요." })
   );
+  fill(actions, button("스타일", { grow: true, onClick: () => submit("discover", draft.request) }), button("확정", { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("confirm") }));
+  fill($("dock"), box);
   update();
-  fill(actions, button("스타일", { onClick: () => submit("discover", draft.request) }), attachButton(), generate, button("확정", { variant: "success", hidden: !current.candidates.length, onClick: () => submit("confirm") }));
 }
 
 function confirmPanel(current, body, actions) {
-  const send = button("보내기", { variant: "primary", onClick: () => submit(null) });
-  const update = () => { send.disabled = !draft.comment.trim(); };
+  const box = answerBox("comment", "더 보고 싶은 게 있으면 적어 주세요. 예: 다른 대상도 한두 장 더", { attaching: false, sendTitle: "보내기", onSend: () => submit(null), onInput: () => update() });
+  const update = () => { box.send.disabled = !draft.comment.trim(); };
   fill(body,
     h("h2", { text: "레퍼런스로 쓸 이미지를 골라 주세요" }),
-    h("p", { class: "lead", id: "selection-count" }),
-    composer("comment", "더 보고 싶은 게 있으면 적어 주세요. 예: 다른 대상도 한두 장 더", { attaching: false, onInput: update })
+    h("p", { class: "lead", id: "selection-count" })
   );
-  fill(actions, button("샘플", { onClick: () => submit("sample", draft.comment) }), send, button("확정", { variant: "success", grow: true, onClick: () => submit("done") }));
+  fill(actions, button("샘플", { onClick: () => submit("sample", draft.comment) }), button("확정", { variant: "success", grow: true, onClick: () => submit("done") }));
+  fill($("dock"), box);
   update();
   syncSelection();
 }
 
 function generatePanel(current, body, actions) {
   const started = current.candidates.length > 0;
-  const generate = button("생성", { variant: "primary", grow: true, onClick: () => submit(draft.picked.size ? "refine" : "new") });
-  const fresh = iconButton("plus", "새로 그리기", () => submit("new"), { hidden: !started });
-  const update = () => { generate.disabled = fresh.disabled = !draft.request.trim(); };
+  const box = answerBox("request", started ? "예: 손잡이를 더 크게" : "예: 노트북 앞의 커피잔", { sendTitle: "생성", onSend: () => submit(draft.picked.size ? "refine" : "new"), onInput: () => update() });
+  const fresh = button("새로 그리기", { iconName: "plus", grow: true, hidden: !started, onClick: () => submit("new") });
+  const update = () => { box.send.disabled = fresh.disabled = !draft.request.trim(); };
   fill(body,
     h("h2", { text: started ? "고르고, 어떻게 바꿀지 적어 주세요" : "무엇을 만들까요?" }),
-    h("p", { class: "lead", id: "selection-count", text: started ? "" : "만든 이미지는 보관함에 자동으로 모여요." }),
-    composer("request", started ? "예: 손잡이를 더 크게" : "예: 노트북 앞의 커피잔", { onInput: update, hint: "생성" })
+    h("p", { class: "lead", id: "selection-count", text: started ? "" : "만든 이미지는 보관함에 자동으로 모여요." })
   );
+  fill(actions, button("아이데이션", { grow: true, onClick: () => submit("discover", draft.request) }), fresh);
+  fill($("dock"), box);
   update();
-  fill(actions, button("아이데이션", { onClick: () => submit("discover", draft.request) }), attachButton(), fresh, generate);
   syncSelection();
 }
 
 function modelPanel(current, body, actions) {
-  const generate = button("그리기", { variant: "primary", grow: true, onClick: () => submit("request") });
-  const update = () => { generate.disabled = !draft.request.trim(); };
+  const box = answerBox("request", "예: 창가의 몬스테라", { sendTitle: "그리기", onSend: () => submit("request"), onInput: () => update() });
+  const update = () => { box.send.disabled = !draft.request.trim(); };
   fill(body,
     h("h2", { text: `${shortModel(current.model)}로 그려 보세요` }),
-    h("p", { class: "lead", text: "레퍼런스를 붙여 한 장씩 그려요. 이 스타일답게 나오면 추가를 눌러 주세요." }),
-    composer("request", "예: 창가의 몬스테라", { onInput: update, hint: "그리기" })
+    h("p", { class: "lead", text: "레퍼런스를 붙여 한 장씩 그려요. 이 스타일답게 나오면 추가를 눌러 주세요." })
   );
+  fill(actions, button("추가", { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("done") }));
+  fill($("dock"), box);
   update();
-  fill(actions, attachButton(), generate, button("추가", { variant: "success", hidden: !current.candidates.length, onClick: () => submit("done") }));
 }
 
 // What the picks mean for the next step, kept in step with the cards.
@@ -749,7 +750,7 @@ function syncSelection() {
 }
 
 async function submit(decision, reason = "") {
-  const buttons = [...$("panel-actions").querySelectorAll("button")];
+  const buttons = [...$("panel-actions").querySelectorAll("button"), ...$("dock").querySelectorAll("button")];
   buttons.forEach(node => { node.disabled = true; });
   const talking = ["discover", "confirm"].includes(kind());
   try {

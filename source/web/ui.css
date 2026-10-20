@@ -212,6 +212,13 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 
 /* ---------- text input ---------- */
 
+/* composer: the message box under a conversation */
+.composer { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: 26px; background: var(--surface); box-shadow: var(--shadow-md); transition: border-color .15s, box-shadow .15s; }
+.composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft); }
+.composer > .thumbs { padding: var(--space-1) var(--space-1) 0; }
+.composer-row { display: flex; align-items: flex-end; gap: var(--space-2); }
+.composer-row .button.icon-only { flex: none; border-radius: 50%; }
+.composer textarea { flex: 1; min-width: 0; max-height: 220px; padding: 9px 4px; border: 0; background: transparent; color: var(--fg); font: inherit; line-height: 22px; resize: none; outline: none; }
 .text-input { width: 100%; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface); resize: none; outline: none; transition: border-color .15s, box-shadow .15s; }
 .text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
