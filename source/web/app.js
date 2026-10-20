@@ -53,6 +53,8 @@ let rendered = null;
 let following = false;
 let archiveData = null;
 let selecting = null;
+// The model list with prices, read once per page load; the server keeps it for a day.
+let catalogModels = null;
 
 function freshDraft(key = null, picked = []) {
   return { key, picked: new Set(picked), notes: {}, comment: "", request: "" };
@@ -530,7 +532,7 @@ function renderIdlePanel(body, actions) {
       overview.based_on ? h("div", {}, [h("dt", { text: "바탕 스타일" }), h("dd", { text: overview.based_on })]) : null
     ]),
     sectionTitle("모델", button("모델 추가", { small: true, onClick: addModel })),
-    rowList(overview.models.map(modelRow)),
+    h("div", { id: "model-rows" }, [rowList(overview.models.map(modelRow))]),
     sectionTitle("세션", sessions.length ? `${sessions.length}개` : ""),
     sessions.length ? rowList(sessions.map(sessionRow)) : h("p", { class: "muted", text: "아직 세션이 없어요." })
   );
@@ -539,13 +541,15 @@ function renderIdlePanel(body, actions) {
   const ideation = button("새 아이데이션", { grow: true });
   ideation.addEventListener("click", () => openSession("generate", null, ideation, true));
   fill(actions, ideation, image);
+  if (!catalogModels) loadCatalog().then(() => { if ($("model-rows")) fill($("model-rows"), rowList(data.overview.models.map(modelRow))); }).catch(() => {});
 }
 
 // A row per model: choosing one makes it the model in use; any other can be removed.
 function modelRow(model) {
   const inUse = model === data.overview.model;
+  const listed = catalogModels && catalogModels.find(each => each.id === model);
   return listRow({
-    title: shortModel(model), detail: model, current: inUse, hint: inUse ? null : "이 모델로 그리기", onClick: () => useModel(model),
+    title: shortModel(model), detail: listed ? priceLabel(listed) : model, current: inUse, hint: inUse ? null : "이 모델로 그리기", onClick: () => useModel(model),
     aside: inUse ? pill("사용 중", { tone: "success" }) : tool("trash", "모델 삭제", () => removeModel(model), { quiet: true })
   });
 }
@@ -604,9 +608,14 @@ function priceLabel(model) {
   return `토큰 과금 ($${(price.cost * 1e6).toFixed(0)}/100만)`;
 }
 
+async function loadCatalog() {
+  if (!catalogModels) catalogModels = (await api("/api/catalog")).models;
+  return catalogModels;
+}
+
 async function addModel() {
   let catalog;
-  try { catalog = (await api("/api/catalog")).models; }
+  try { catalog = await loadCatalog(); }
   catch (error) { return toast(error.message, "error"); }
   // A style draws with all its references attached, so only models that take that many are offered; one already being added is not offered twice.
   const adding = data.sessions.filter(session => session.kind === "model").map(session => session.model);
