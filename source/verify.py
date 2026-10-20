@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Run the engine and the studio server end to end in a throwaway workspace, generating nothing and spending nothing.
 
-Makes a style through its whole life (make session, discover, sample, confirm), opens generate and model
+Checks that every text on screen has its Korean, then makes a style through its whole life (make session, discover, sample, confirm), opens generate and model
 sessions, talks a generate session into a brief, curates references, switches and removes models, renames and deletes, asks the server for
 every page's state, and stores a key. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
 
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -203,7 +204,24 @@ def server(workspace, generate):
         process.wait()
 
 
+def words():
+    """Every text the studio shows is looked up in i18n.js, so each must have its Korean there."""
+    web = ENGINE.parent / "web"
+    korean = set(re.findall(r'^  ("(?:[^"\\]|\\.)*"): ', (web / "i18n.js").read_text(), re.M))
+    shown = set()
+    for name in ("app.js", "ui.js"):
+        source = (web / name).read_text()
+        shown.update(re.findall(r'\bt\(("(?:[^"\\]|\\.)*")', source))
+        for singular, plural in re.findall(r'\btn\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")', source):
+            shown.update((singular, plural))
+    page = (web / "index.html").read_text()
+    shown.update(json.dumps(text, ensure_ascii=False) for text in re.findall(r"data-t>([^<]+)<", page) + re.findall(r'title="([^"]+)"[^>]*data-t-title', page))
+    missing = sorted(shown - korean)
+    check("every text on screen has its Korean" + (f" (missing {', '.join(missing)})" if missing else ""), not missing)
+
+
 def main():
+    words()
     workspace = Path(tempfile.mkdtemp(prefix="asset-studio-verify-")).resolve()
     try:
         (workspace / "styles").mkdir()

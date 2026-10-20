@@ -154,7 +154,7 @@ function imageFrame(path, { fit = "natural", onClick = null, number = null, chec
 function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null } = {}) {
   return h(remove ? "div" : "button", { class: ["thumb", picked && "picked", small && "small"].filter(Boolean).join(" "), type: remove ? null : "button", title, onclick: onClick }, [
     h("img", { src: fileUrl(path), alt: "", loading: "lazy" }),
-    remove ? h("button", { class: "remove", type: "button", title: "빼기", html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
+    remove ? h("button", { class: "remove", type: "button", title: t("Remove"), html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
   ]);
 }
 

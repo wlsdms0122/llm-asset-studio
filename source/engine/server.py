@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 return self.send_file(WEB / "index.html")
-            if path in ("/ui.css", "/ui.js", "/app.css", "/app.js"):
+            if path in ("/i18n.js", "/ui.css", "/ui.js", "/app.css", "/app.js"):
                 return self.send_file(WEB / path.lstrip("/"))
             if path == "/api/styles":
                 return self.send_json(200, {"styles": [summary(style) for style in self.all_styles()]})

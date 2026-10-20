@@ -4,7 +4,7 @@ Makes images in one consistent style with an AI agent: app icons, spot illustrat
 
 The agent does all the drawing, through OpenRouter. You answer it either in the conversation or in the web studio, and both work on the same records.
 
-The web studio and the questions the engine asks are in Korean only for now.
+The web studio is in English or Korean, chosen in its app bar. The questions the engine asks are in Korean.
 
 This directory is an [open-package](https://github.com/wlsdms0122/open-package).
 
@@ -70,6 +70,7 @@ source/
     sheet.py           the latest round as one numbered image
     workspace.py       where the workspace is, and the key in it
   web/                 the web studio; its README.md is the design system
+    i18n.js            every text on screen, in English with its Korean
     ui.css, ui.js      tokens and components
     app.css, app.js    the pages, built only from those components
     index.html         the shell

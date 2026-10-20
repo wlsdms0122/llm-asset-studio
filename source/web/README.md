@@ -8,7 +8,8 @@ The web studio is built from one set of tokens and components so every screen be
 - The chrome is neutral (grays, one blue accent) so the images' own colors read true.
 - In a session, what the user writes is sent from the composer docked under the stage, as in a chat app; its send button is the one primary action. The panel's buttons move between stages (`success`) or are secondary. Outside a session, a panel has one primary action at its bottom right.
 - Actions on an image are icons over the image, shown on hover (`tool`). Actions on a page are labeled buttons.
-- Labels are short Korean nouns or verbs. A title line says what to do; help text appears only where something can go wrong.
+- Labels are short nouns or verbs. A title line says what to do; help text appears only where something can go wrong.
+- Every text on screen is written in English through `t()` (or `tn()` when it counts something), and `i18n.js` gives its Korean. The shell's fixed words carry `data-t` or `data-t-title`. The viewer picks the language in the app bar and the choice stays in that browser. `verify` fails on a text without its Korean.
 - An image is shown either at its own ratio (`imageFrame` natural: boards, candidates, the lightbox) or cropped to a square cell (`imageFrame` fill: grids of many images, cards). Grids always use square cells so rows line up.
 - Adding an image to a style's references is a one-way action available wherever the image is shown; whether an image is a reference is not a property of the image. References are removed only from the reference list.
 

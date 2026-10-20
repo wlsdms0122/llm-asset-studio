@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,15 +13,16 @@
 <header class="appbar">
   <a class="brand" href="#/"><span class="brand-mark"></span>Asset Studio</a>
   <nav class="nav">
-    <a href="#/" data-nav="home">스타일</a>
-    <a href="#/archive" data-nav="archive">보관함</a>
+    <a href="#/" data-nav="home" data-t>Styles</a>
+    <a href="#/archive" data-nav="archive" data-t>Archive</a>
   </nav>
-  <button class="button primary small" id="new-style" type="button">새 스타일</button>
+  <div id="language"></div>
+  <button class="button primary small" id="new-style" type="button" data-t>New style</button>
 </header>
 
 <main id="view"></main>
 
-<div class="lost" id="lost" hidden>서버에 연결할 수 없어요. 다시 연결하는 중…</div>
+<div class="lost" id="lost" hidden data-t>Server unreachable. Reconnecting…</div>
 <div class="toasts" id="toasts"></div>
 <div class="menu" id="menu" hidden></div>
 
@@ -33,7 +34,7 @@
     <div class="modal-choices" id="modal-choices" hidden></div>
     <p class="field-error" id="modal-error" hidden></p>
     <div class="modal-actions">
-      <button class="button" type="button" id="modal-cancel">취소</button>
+      <button class="button" type="button" id="modal-cancel" data-t>Cancel</button>
       <button class="button primary" type="submit" id="modal-confirm"></button>
     </div>
   </form>
@@ -41,19 +42,20 @@
 
 <div class="lightbox" id="lightbox" hidden>
   <div class="lightbox-stage">
-    <button class="lightbox-nav previous" id="lightbox-previous" type="button" aria-label="이전"></button>
+    <button class="lightbox-nav previous" id="lightbox-previous" type="button" title="Previous" aria-label="Previous" data-t-title></button>
     <img id="lightbox-image" alt="">
-    <button class="lightbox-nav next" id="lightbox-next" type="button" aria-label="다음"></button>
+    <button class="lightbox-nav next" id="lightbox-next" type="button" title="Next" aria-label="Next" data-t-title></button>
   </div>
   <aside class="lightbox-info" id="lightbox-info"></aside>
   <div class="lightbox-bar">
     <span class="lightbox-count" id="lightbox-count"></span>
-    <button class="button icon-only" id="lightbox-add" type="button" title="레퍼런스에 추가" hidden></button>
-    <a class="button icon-only" id="lightbox-download" title="다운로드" download></a>
-    <button class="button icon-only" id="lightbox-close" type="button" title="닫기"></button>
+    <button class="button icon-only" id="lightbox-add" type="button" title="Add to references" data-t-title hidden></button>
+    <a class="button icon-only" id="lightbox-download" title="Download" data-t-title download></a>
+    <button class="button icon-only" id="lightbox-close" type="button" title="Close" data-t-title></button>
   </div>
 </div>
 
+<script src="/i18n.js"></script>
 <script src="/ui.js"></script>
 <script src="/app.js"></script>
 </body>
