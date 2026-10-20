@@ -30,7 +30,7 @@ The real cost of every call comes back in `usage.cost` and is written to the sty
 Discovery and ideation candidates are drafts. They show which way a style or an image goes, not its quality, so they come from the cheapest model that can show it, not from the style's model. Free models come and go, so the draft model is chosen when a session's first drafts are due:
 
 1. `open-package models --free` lists the image models that are free today. If one can show what the drafts need, it is the draft model.
-2. Otherwise (the command exits 1 when nothing is free), the draft model is the first of these that `open-package models` still lists and that can show it:
+2. Otherwise (the command exits 1 when nothing is free; exit 3 means some prices could not be read, so it is run again), the draft model is the first of these that `open-package models` still lists and that can show it:
    - `openai/gpt-image-1-mini` with `--quality low`: about $0.002 an image, up to 16 references, up to 10 images a call, transparent backgrounds
    - `openai/gpt-image-2` with `--quality low`: about $0.006, up to 16 references, up to 10 a call
    - `recraft/recraft-v4.1-flash`: $0.007, text only, up to 6 a call

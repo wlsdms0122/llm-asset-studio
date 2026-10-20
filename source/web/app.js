@@ -126,7 +126,8 @@ async function loadStyle() {
 
 // ---------- user actions on styles and references ----------
 
-const STYLE_NAME = /^[\p{L}\p{N}][\p{L}\p{N}-]{1,40}$/u;
+// The rule of style.py style_name, checked here first so a wrong name is answered in the viewer's language.
+const STYLE_NAME = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{1,40}$/u;
 const NAME_RULE = t("Use two or more letters (lowercase for Latin), digits, and hyphens.");
 
 async function askName({ title, description = "", value = "", confirm, submit }) {
@@ -135,7 +136,7 @@ async function askName({ title, description = "", value = "", confirm, submit })
     const name = await ask({ title, description, value, error, placeholder: t("Name, e.g. blog-cover"), confirm, input: "text" });
     if (name == null) return;
     value = name;
-    const normalized = name.normalize("NFC");
+    const normalized = name.normalize("NFKC");
     if (!STYLE_NAME.test(normalized) || normalized !== normalized.toLowerCase()) { error = NAME_RULE; continue; }
     try { return await submit(normalized); }
     catch (failure) { error = failure.message.includes("already exists") ? t("A style with this name already exists.") : failure.message; }
