@@ -3,8 +3,9 @@
 What the agent knows about image models: what each can do, what it costs, and how it reads a prompt. Models and prices change every few months, so the facts below carry the date they were checked; before relying on one, read the live values. `generate.py` already reads each model's accepted options and caches them in the workspace's `cache/` for a day.
 
 ```
-# every image model on OpenRouter, with pricing (no key needed)
-curl -s https://openrouter.ai/api/v1/images/models
+# every image model on OpenRouter with the price of one image and the references it takes, cached for a day
+open-package models
+open-package models --free
 # what one model accepts: endpoints[].supported_parameters (input_references max, n, seed, background, ...)
 curl -s https://openrouter.ai/api/v1/images/models/<id>/endpoints
 ```
@@ -19,18 +20,28 @@ The real cost of every call comes back in `usage.cost` and is written to the sty
 
 ## Choosing a model
 
-- Ideation candidates (`ideation.md`): free models only, the free generator below.
-- Discovery candidates: free first. `inclusionai/ming-image-0.1-design` is the only free generator (text only, one image a call, about 30 to 40 seconds, strongest at flat graphic design but renders soft 3D well). When it cannot show what a question needs, ask the user before using a cheap paid one: `openai/gpt-image-2` or `gpt-image-2.5-flare` at low quality (about $0.006, up to 16 references, up to 10 images a call) or `recraft/recraft-v4.1-flash` ($0.007, text only, fast). A candidate built from the user's images needs a model that takes references.
+- Discovery and ideation candidates: the draft model, below.
 - Sample and generate: one model per style, chosen for how well it renders that kind of look, whether it takes references, and price. Seedream 5.0 Flash is the current default.
 - Comparing expensive models (GPT Image 2.5, Recraft V4 Styles, Nano Banana 2.1) is worth it only when a style's first-try acceptance is low.
 - New models are unstable for their first days (one had about 43% availability on launch day). Prefer a model that has been out a few weeks.
+
+## The draft model
+
+Discovery and ideation candidates are drafts. They show which way a style or an image goes, not its quality, so they come from the cheapest model that can show it, not from the style's model. Free models come and go, so the draft model is chosen when a session's first drafts are due:
+
+1. `open-package models --free` lists the image models that are free today. If one can show what the drafts need, it is the draft model.
+2. Otherwise (the command exits 1 when nothing is free), the draft model is the first of these that `open-package models` still lists and that can show it:
+   - `openai/gpt-image-1-mini` with `--quality low`: about $0.002 an image, up to 16 references, up to 10 images a call, transparent backgrounds
+   - `openai/gpt-image-2` with `--quality low`: about $0.006, up to 16 references, up to 10 a call
+   - `recraft/recraft-v4.1-flash`: $0.007, text only, up to 6 a call
+
+A draft built from the user's images needs a model that takes references. A paid draft model is used only after the user agrees: the agent names the model and the price of one image, and the user's yes covers that session's drafts. When a candidate leaves the list, or a cheaper one that takes references and reads a style's rendering appears, this list is updated.
 
 ## Facts (checked 2026-10-09 to 10-11)
 
 | model | references | n per call | seed | transparent | per image (1K) |
 |---|---|---|---|---|---|
 | `bytedance-seed/seedream-5-0-flash` | 14, free | 1 | yes | | $0.018 |
-| `inclusionai/ming-image-0.1-design` | 0 | 1 | | | free |
 | `openai/gpt-image-1-mini` (low) | 16 | 10 | | yes | about $0.002 |
 | `openai/gpt-image-2` (low) | 16 | 10 | | | about $0.006 |
 | `openai/gpt-image-2.5-flare` / `sunburst` | 16 | 10 | | yes | token priced, about $0.006 low to $0.05 high |
@@ -48,7 +59,6 @@ The real cost of every call comes back in `usage.cost` and is written to the sty
 ## How each model reads a prompt
 
 - Seedream 5.0: each clause is a directive and anything unmentioned stays loose, so restate the rendering every time. Subject first, natural sentences, under about 600 words. References are best named by what they show. A plain studio shot on a plain background is the strongest reference. It draws a crop shape it is told about, and a named material brings its photographic look (a glass vase grew a thin outline, leathery leaves a sheen).
-- Ming 0.1 design: text only. Follows detailed descriptions of form and finish closely; an occasional halo around shapes or a paper grain on surfaces is the model, not the words.
 - GPT Image: references as "Image 1: role", in order. Starts from the scene. Accepts short "no X" lines but positive wording still works better. Repeat what must be kept on every edit.
 - Nano Banana (Gemini): references by role ("the attached sketch"); subject first; officially renders Korean text.
 - FLUX.2: starts from the medium; ties each hex color to one object; pro and max accept a JSON prompt.

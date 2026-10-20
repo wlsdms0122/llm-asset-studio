@@ -41,8 +41,8 @@ The first message restates the need as a design problem in one or two plain sent
 
 ## Images in ideation
 
-- Every ideation candidate comes from a free model. Free means the agent can show more and iterate faster: more ideas in the first round, more versions while developing, a fresh image instead of a long explanation. The free generators are listed in `models.md` (today `inclusionai/ming-image-0.1-design`: text only, one image a call, about 40 seconds, so several calls run side by side).
-- The free model does not draw the style. Each message says what to look at (the idea, the subject, the layout) and what to ignore (the rendering), and each prompt describes the idea in the style's subject terms so the only difference from the final image is the rendering.
+- Every ideation candidate comes from the draft model (`models.md`). A draft costs nothing or close to it, so the agent can show more and iterate faster: more ideas in the first round, more versions while developing, a fresh image instead of a long explanation.
+- The draft model does not draw the style. Each message says what to look at (the idea, the subject, the layout) and what to ignore (the rendering), and each prompt describes the idea in the style's subject terms so the only difference from the final image is the rendering.
 - These are roughs, so they are not archived.
 - When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's `generate` is the go-ahead; from there the image is drawn with the style's model and references on the board, and every attempt is archived.
 

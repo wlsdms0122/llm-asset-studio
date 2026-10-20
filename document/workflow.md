@@ -31,7 +31,7 @@ The user cannot be asked to name a style; few people outside design can. They ca
   - Every candidate is labeled with the reading it tests (`publish --describe`), so a pick turns straight into a value in `style.md`.
   - All candidates show one plain subject from outside the style's domain (a mug, a chair, a potted plant), or from inside it when the style is scoped to that domain. The subject stays the same while a question is open, so a difference between candidates is a difference in style.
 - A style made for a kind of asset (app icons, logos, thumbnails) is judged in use. One plain subject on a plain background settles the rendering, but the user cannot tell from it how the style will feel on real assets. Once the rendering is roughly settled, show it applied: a few made-up uses with different subjects and colors, and a composite of how they sit together where they are seen (icons masked and laid out at home screen sizes). The composite is put together locally and costs nothing.
-- Candidate images come from a free model by default (`inclusionai/ming-image-0.1-design`: text only, one image a call). Their job is to show which way the style goes, not quality, and the message says what to look at and what to ignore. When the free model cannot show what is being asked (it takes no reference images and leans toward flat graphic design), the agent asks before using a paid one, with the model and the cost: "four images on gpt-image-2 at low quality, about $0.03". It uses one only after the user says yes in their reply. Low quality GPT Image (about $0.006 an image, up to 16 references, up to 10 images a call) and Recraft V4.1 Flash (about $0.007, text only) suit rough candidates; a candidate built from the user's images needs a model that takes references.
+- Candidate images come from the draft model (`models.md`: free when a free model can show it, otherwise a cheap paid one after the user says yes). Their job is to show which way the style goes, not quality, and the message says what to look at and what to ignore.
 - Signs the style is pinned down: the important values have not changed for two rounds; the agent predicted the user's pick before showing it; the image from the written style alone was chosen; every section is filled, with what is undecided marked open. Then the agent proposes sampling. Signs of fatigue (shorter replies, "anything is fine", picks that flip every round) mean stopping to summarize or changing the question, not another round of images.
 - Coming back from sample, the conversation already shows what the sample drew, in the place it was drawn; the agent's next message refers to those images instead of attaching them again.
 - About eight to ten user answers is a normal length. More without settling means a question is missing: ask a broader one or ask for another reference.
@@ -93,7 +93,7 @@ The images a model session draws are made with the confirmed style, so they are 
 
 A generate session opens one of two ways, chosen on the style's page: "new image" opens on the board for a user who knows what to make, and "new ideation" opens in ideation for one who does not (`session.py open <style> generate --ideation`). It is the same session either way: the board's `discover` goes to ideation, ideation's `generate` goes to the board, and a session that has talked is listed as an ideation.
 
-In ideation the agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the session's `brief.md` as the image takes shape, the way discovering a style writes `style.md`. Every ideation candidate is drawn with a free model. When the image is concrete the agent proposes drawing it with the style's model; on the user's `generate` it writes a prompt from `brief.md`, `style.md`, and the prompting file, draws one image with the references, and publishes a generate round whose request is the brief's first line. Going back to ideation continues the conversation, with what the board drew shown in it. How the designer works and what the brief holds are in `ideation.md`.
+In ideation the agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the session's `brief.md` as the image takes shape, the way discovering a style writes `style.md`. Every ideation candidate is drawn with the draft model. When the image is concrete the agent proposes drawing it with the style's model; on the user's `generate` it writes a prompt from `brief.md`, `style.md`, and the prompting file, draws one image with the references, and publishes a generate round whose request is the brief's first line. Going back to ideation continues the conversation, with what the board drew shown in it. How the designer works and what the brief holds are in `ideation.md`.
 
 ## Rounds and surfaces
 
@@ -127,9 +127,13 @@ open-package session new <style>
 open-package session new <style> --from <confirmed style>
 S=sessions/<style>/<session id>       # every command below takes the session folder
 
+# the draft model for candidates (models.md): a free one, else the first listed candidate, after the user's yes
+open-package models --free
+D=<draft model id>
+
 # discover: after rewriting styles/<style>/style.md, a turn with candidates
-open-package generate $S --model inclusionai/ming-image-0.1-design --prompt-file /tmp/1.md --into c1 --tag discover
-open-package generate $S --model inclusionai/ming-image-0.1-design --prompt-file /tmp/2.md --into c2 --tag discover
+open-package generate $S --model $D --prompt-file /tmp/1.md --into c1 --tag discover
+open-package generate $S --model $D --prompt-file /tmp/2.md --into c2 --tag discover
 R=$(open-package session next $S)          # the round those images went into
 open-package session publish $R --kind discover --note "<the style in plain words, what changed, the questions>" \
   --describe "<reading 1>" --describe "<reading 2>" --review "<verdict 1>" --review "<verdict 2>"
@@ -151,7 +155,7 @@ open-package session publish "$(open-package session next $G)" --kind generate -
 # ideation: the user opens it on the web or reaches it from the board; in conversation the agent opens one
 # $G/brief.md is written once the image has a shape, and from then on the user can move to generate
 G=$(open-package session open styles/<style> generate --ideation)
-open-package generate $G --model inclusionai/ming-image-0.1-design --prompt-file /tmp/1.md --into c1 --tag discover
+open-package generate $G --model $D --prompt-file /tmp/1.md --into c1 --tag discover
 open-package session publish "$(open-package session next $G)" --kind discover --note "<the need as understood, the ideas and why, the recommendation, the decisions>" --describe "<idea 1 and why it fits>"
 # after the user's generate: draw from brief.md, with its heading as the request
 open-package generate $G --references --request "<brief.md heading>" --prompt-file /tmp/prompt.md --tag generate

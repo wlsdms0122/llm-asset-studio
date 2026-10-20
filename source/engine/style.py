@@ -57,6 +57,13 @@ class Style:
             raise StyleError("a style name is lowercase letters, digits, and hyphens")
         return cls(Path(styles) / name)
 
+    @classmethod
+    def all(cls, styles):
+        styles = Path(styles)
+        if not styles.is_dir():
+            return []
+        return [cls(path) for path in sorted(styles.iterdir()) if path.is_dir() and not path.name.startswith(".")]
+
     # Locations
 
     @property

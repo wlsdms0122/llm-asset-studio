@@ -26,6 +26,7 @@ open-package session <command> ...        # sessions and rounds: new, open, next
 open-package generate <session> ...       # draw into a session through OpenRouter
 open-package style <command> ...          # changes to a style: rename, delete, reference-add, reference-remove, use, model-remove
 open-package sheet <session>              # the latest round as one numbered image, for the conversation
+open-package models [--free]              # every image model on OpenRouter with its price, or only the free ones
 open-package key                          # store the OpenRouter API key, typed or piped in
 open-package verify                       # the engine and the studio end to end in a throwaway workspace, at no cost
 ```
@@ -64,6 +65,7 @@ source/
     session.py         a style's sessions: rounds, answers, confirm, adding a model
     generate.py        image generation through OpenRouter
     capability.py      what a model accepts (references, sizes, images per call), read from OpenRouter
+    catalog.py         every image model on OpenRouter with its price, and what each has cost here
     server.py          the web studio's server
     sheet.py           the latest round as one numbered image
     workspace.py       where the workspace is, and the key in it

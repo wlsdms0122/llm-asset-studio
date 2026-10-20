@@ -12,13 +12,11 @@ sessions/*/*/session.json, does the work, and publishes the next round; the open
 import argparse
 import base64
 import binascii
-import concurrent.futures
 import io
 import json
 import mimetypes
 import re
 import time
-import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,13 +24,12 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import workspace
 from capability import reference_limit
+from catalog import catalog
 from session import Session, create_style, open_session
 from style import IMAGE_SUFFIXES, Style, StyleError
 
 ENGINE = Path(__file__).resolve().parent
 WEB = ENGINE.parent / "web"
-CATALOG = workspace.CACHE / "catalog.json"
-CATALOG_TTL = 24 * 60 * 60
 
 
 def main():
@@ -104,54 +101,6 @@ def check_references(style, count, model=None):
         limit = reference_limit(each)
         if limit is not None and count > limit:
             raise StyleError(f"{each} takes at most {limit} references; this would make {count}")
-
-
-def catalog(styles):
-    """Every image model on OpenRouter with its price, read at most once a day, and what each has cost here so far."""
-    if CATALOG.exists() and time.time() - CATALOG.stat().st_mtime < CATALOG_TTL:
-        models = json.loads(CATALOG.read_text())
-    else:
-        with urllib.request.urlopen("https://openrouter.ai/api/v1/images/models", timeout=30) as response:
-            rows = json.load(response)
-        rows = rows.get("data", rows) if isinstance(rows, dict) else rows
-        with concurrent.futures.ThreadPoolExecutor(12) as pool:
-            prices = list(pool.map(lambda row: price_of(row["id"]), rows))
-        models = [{
-            "id": row["id"],
-            "name": row.get("name") or row["id"],
-            "references": (row.get("supported_parameters", {}).get("input_references") or {}).get("max", 0),
-            "created": row.get("created"),
-            "price": price
-        } for row, price in zip(rows, prices)]
-        CATALOG.parent.mkdir(parents=True, exist_ok=True)
-        CATALOG.write_text(json.dumps(models, indent=2))
-    measured = {}
-    for style in styles:
-        for entry in style.ledger().generations():
-            if entry.get("cost") is not None:
-                measured.setdefault(entry["model"], []).append(entry["cost"] / len(entry["outputs"]))
-    return [{**model, "measured": sum(measured[model["id"]]) / len(measured[model["id"]]) if model["id"] in measured else None} for model in models]
-
-
-def price_of(model):
-    """The lowest price of one output image, by its billing unit (image, megapixel, token), and of one reference."""
-    try:
-        with urllib.request.urlopen(f"https://openrouter.ai/api/v1/images/models/{model}/endpoints", timeout=30) as response:
-            endpoints = json.load(response).get("endpoints", [])
-    except (OSError, ValueError):
-        return None
-    pricing = (endpoints[0].get("pricing") or []) if endpoints else []
-    outputs = [item for item in pricing if item.get("billable") == "output_image"]
-    if not outputs:
-        return None
-    lowest = min(outputs, key=lambda item: item.get("cost_usd") or 0)
-    reference = next((item for item in pricing if item.get("billable") in ("input_image", "input_reference") and item.get("unit") in ("image", "request")), None)
-    return {
-        "unit": lowest.get("unit"),
-        "cost": lowest.get("cost_usd"),
-        "varies": len(outputs) > 1,
-        "reference": reference.get("cost_usd") if reference and reference.get("cost_usd") else None
-    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -334,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
         return current.directory / "attachments"
 
     def all_styles(self):
-        return [Style(path) for path in sorted(self.styles.iterdir()) if path.is_dir() and not path.name.startswith(".")]
+        return Style.all(self.styles)
 
     def style(self, name):
         path = (self.styles / name).resolve()
