@@ -16,7 +16,7 @@ With the web studio, the agent starts `open-package studio` and keeps watching `
 
 Store the OpenRouter key once with `open-package key`. `open-package verify` runs the engine and the studio end to end in a throwaway workspace and spends nothing, so run it first.
 
-Python 3.11 or later. `sheet` needs Pillow.
+Python 3.11 or later. `sheet` needs Pillow. `cutout` needs macOS 14 or later and Swift (the Xcode Command Line Tools).
 
 ## Commands
 
@@ -27,6 +27,7 @@ open-package generate <session> ...       # draw into a session through OpenRout
 open-package style <command> ...          # changes to a style: rename, delete, reference-add, reference-remove, use, model-remove
 open-package sheet <session>              # the latest round as one numbered image, for the conversation
 open-package models [--free]              # every image model on OpenRouter with its price, or only the free ones
+open-package cutout <session> <image> ... # remove the background of images into a session, on this Mac, at no cost
 open-package key                          # store the OpenRouter API key, typed or piped in
 open-package verify                       # the engine and the studio end to end in a throwaway workspace, at no cost
 ```
@@ -66,6 +67,7 @@ source/
     generate.py        image generation through OpenRouter
     capability.py      what a model accepts (references, sizes, images per call), read from OpenRouter
     catalog.py         every image model on OpenRouter with its price, and what each has cost here
+    cutout.py          background removal into a session, through cutout.swift (macOS Vision)
     server.py          the web studio's server
     sheet.py           the latest round as one numbered image
     workspace.py       where the workspace is, and the key in it

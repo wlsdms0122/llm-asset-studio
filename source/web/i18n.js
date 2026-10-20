@@ -180,6 +180,8 @@ const KO = {
   "Close": "닫기",
   "Remove": "빼기",
   "Language": "언어",
+  "Tool": "도구",
+  "Background removal": "배경 제거",
   "Cancel selection": "선택 취소"
 };
 

@@ -86,7 +86,8 @@ The images a model session draws are made with the confirmed style, so they are 
 - Each generate session is its own thread, and the user may keep several. The agent reads the session's rounds (requests, prompts, picks) for what came before; nothing depends on the agent remembering another conversation.
 - The user describes an image; the agent writes the prompt from `style.md` and the prompting file, generates with the references, reviews with `review.md`, and publishes. Attempts are listed in the order they were drawn, the one being drawn last.
 - Refining rewrites the picked attempt's prompt with the user's change. Whether to also attach the picked attempt is the agent's call: the references carry the style, so the attempt is attached only when its composition has to survive. Images the user attaches to a request describe that request (a pose, an object) and go after the references.
-- Every image shown is archived with its request, prompt, and model. The ones an app uses are copied into that app's repository.
+- Work on a finished image that needs no drawing goes through a tool instead of the model, on this computer and at no cost. Removing the background (`cutout`, macOS Vision) writes each image's subjects as a transparent PNG into the next round, so a request like "take the background off 2" is answered on the board like any other attempt. Prefer it to asking a model for a transparent background when the image already exists.
+- Every image shown is archived with its request, prompt, and model, or the tool that made it. The ones an app uses are copied into that app's repository.
 - Requests that keep asking for the same change are not about one image. If `style.md` already asks for it, the prompting file is fixed; if it asks for something else, the user wants a different style, and the agent suggests making one from this.
 
 ## Ideation
@@ -150,6 +151,9 @@ open-package session confirm $S            # after the user's done
 # generate: the user opens sessions on the web; in conversation the agent opens one
 G=$(open-package session open styles/<style> generate)
 open-package generate $G --references --request "<the user's words>" --prompt-file /tmp/prompt.md --tag generate
+open-package session publish "$(open-package session next $G)" --kind generate --describe "..."
+# a tool on an image already made: the background removed, into the next round
+open-package cutout $G "$G/<round>/<image>" --request "<the user's words>"
 open-package session publish "$(open-package session next $G)" --kind generate --describe "..."
 
 # ideation: the user opens it on the web or reaches it from the board; in conversation the agent opens one

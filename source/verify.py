@@ -2,7 +2,7 @@
 """Run the engine and the studio server end to end in a throwaway workspace, generating nothing and spending nothing.
 
 Checks that every text on screen has its Korean, then makes a style through its whole life (make session, discover, sample, confirm), opens generate and model
-sessions, talks a generate session into a brief, curates references, switches and removes models, renames and deletes, asks the server for
+sessions, removes a background, talks a generate session into a brief, curates references, switches and removes models, renames and deletes, asks the server for
 every page's state, and stores a key. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
 
@@ -38,6 +38,14 @@ def png(path, color):
     raw = b"".join(b"\x00" + bytes(color) * width for _ in range(height))
     chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def disc(path):
+    """A red disc on a light background: a subject Vision can lift."""
+    size = 128
+    rows = b"".join(b"\x00" + b"".join(bytes((220, 60, 60) if (x - 64) ** 2 + (y - 64) ** 2 < 35 ** 2 else (245, 245, 245)) for x in range(size)) for y in range(size))
+    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
 def inside(workspace):
@@ -94,6 +102,19 @@ def lifecycle(workspace):
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "generate")
     archive = (workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()
     check("generate images are archived", any(json.loads(line)["kind"] == "generate" for line in archive))
+
+    if sys.platform == "darwin" and shutil.which("swift"):
+        subject = workspace / "subject.png"
+        disc(subject)
+        result = engine(workspace, "cutout.py", f"sessions/demo/{generate}", str(subject), "--request", "no background", ok=False)
+        outputs = json.loads(result.stdout or "{}").get("outputs") or []
+        # PNG color type 6 is RGBA.
+        check("cutout writes the subject into the next round with transparency", result.returncode == 0 and len(outputs) == 1 and (workspace / outputs[0]).read_bytes()[25] == 6)
+        if outputs:
+            engine(workspace, "session.py", "publish", str((workspace / outputs[0]).parent), "--kind", "generate")
+            check("a cutout is archived with its tool", json.loads((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()[-1]).get("tool") == "cutout")
+    else:
+        print("skip cutout, which needs macOS and Swift")
 
     image = next(round_directory.glob("*.png"))
     engine(workspace, "style.py", "reference-add", "styles/demo", str(image))

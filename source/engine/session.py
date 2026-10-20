@@ -318,6 +318,7 @@ class Round:
                 "request": made.get(path, {}).get("request"),
                 "prompt": made.get(path, {}).get("prompt"),
                 "model": None if blind else made.get(path, {}).get("model"),
+                "tool": None if blind else made.get(path, {}).get("tool"),
                 "cost": None if blind else cost_of(made.get(path, {})),
                 "description": self.record.get("descriptions", {}).get(path),
                 "new": path.startswith(here + "/"),

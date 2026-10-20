@@ -238,6 +238,7 @@ class Style:
             "request": made.get("request"),
             "prompt": made.get("prompt"),
             "model": made.get("model"),
+            "tool": made.get("tool"),
             "cost": cost_of(made),
             "time": timestamp()
         })

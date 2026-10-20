@@ -19,6 +19,9 @@ const DRAWING = ["request", "refine", "new"];
 const money = value => value == null ? "-" : `$${value < 0.01 && value > 0 ? value.toFixed(4) : value.toFixed(3)}`;
 const pad = (number, width = 2) => String(number).padStart(width, "0");
 const shortModel = model => (model || "").split("/").pop();
+const TOOL_NAMES = { cutout: t("Background removal") };
+// What made an image, for its details: a model and what one image cost, or a tool run on this computer.
+const madeWith = item => item.tool ? [t("Tool"), TOOL_NAMES[item.tool]] : [t("Model"), item.model && `${shortModel(item.model)}${item.cost != null ? ` · ${money(item.cost)}` : ""}`];
 const fileName = path => path.split("/").pop();
 
 function when(time) {
@@ -304,7 +307,7 @@ function lightboxFromArchive(item) {
     path: item.file,
     name: `${item.style}-${fileName(item.file)}`,
     add: { style: item.style, path: item.file },
-    info: [[t("Style"), item.style], [t("Request"), item.request], [t("Model"), item.model && `${shortModel(item.model)}${item.cost != null ? ` · ${money(item.cost)}` : ""}`], [t("Prompt"), item.prompt, true], [t("Made at"), item.time && item.time.replace("T", " ").slice(0, 16)]]
+    info: [[t("Style"), item.style], [t("Request"), item.request], madeWith(item), [t("Prompt"), item.prompt, true], [t("Made at"), item.time && item.time.replace("T", " ").slice(0, 16)]]
   };
 }
 
@@ -827,7 +830,7 @@ function lightboxItems(candidates) {
     path: candidate.path,
     name: `${data.style}-${fileName(candidate.path)}`,
     add: adds ? { style: data.style, path: candidate.path } : null,
-    info: [[t("Request"), candidate.request], [t("Agent's note"), candidate.description], [t("My note"), candidate.note], [t("Review"), candidate.review], [t("Model"), candidate.model && `${shortModel(candidate.model)}${candidate.cost != null ? ` · ${money(candidate.cost)}` : ""}`], [t("Prompt"), candidate.prompt, true]]
+    info: [[t("Request"), candidate.request], [t("Agent's note"), candidate.description], [t("My note"), candidate.note], [t("Review"), candidate.review], madeWith(candidate), [t("Prompt"), candidate.prompt, true]]
   }));
 }
 
@@ -950,7 +953,7 @@ function boardStage(current) {
   const adds = data.overview.confirmed;
   const entries = ordered.map((candidate, index) => {
     const isPicked = answering() ? draft.picked.has(candidate.number) : candidate.picked;
-    const facts = [candidate.model ? shortModel(candidate.model) : null, candidate.cost != null ? money(candidate.cost) : null].filter(Boolean).join(" · ");
+    const facts = candidate.tool ? TOOL_NAMES[candidate.tool] : [candidate.model ? shortModel(candidate.model) : null, candidate.cost != null ? money(candidate.cost) : null].filter(Boolean).join(" · ");
     return h("article", { class: `entry${isGenerate && selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}`, "data-number": candidate.number }, [
       imageFrame(candidate.path, {
         number: candidate.number, check: isGenerate && selectable(),
