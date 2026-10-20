@@ -123,8 +123,8 @@ async function loadStyle() {
 
 // ---------- user actions on styles and references ----------
 
-const STYLE_NAME = /^[a-z0-9][a-z0-9-]{1,40}$/;
-const NAME_RULE = "영문 소문자, 숫자, 하이픈으로 두 글자 이상 적어 주세요.";
+const STYLE_NAME = /^[\p{L}\p{N}][\p{L}\p{N}-]{1,40}$/u;
+const NAME_RULE = "글자(영문은 소문자), 숫자, 하이픈으로 두 글자 이상 적어 주세요.";
 
 async function askName({ title, description = "", value = "", confirm, submit }) {
   let error = "";
@@ -132,8 +132,9 @@ async function askName({ title, description = "", value = "", confirm, submit })
     const name = await ask({ title, description, value, error, placeholder: "이름, 예: blog-cover", confirm, input: "text" });
     if (name == null) return;
     value = name;
-    if (!STYLE_NAME.test(name)) { error = NAME_RULE; continue; }
-    try { return await submit(name); }
+    const normalized = name.normalize("NFC");
+    if (!STYLE_NAME.test(normalized) || normalized !== normalized.toLowerCase()) { error = NAME_RULE; continue; }
+    try { return await submit(normalized); }
     catch (failure) { error = failure.message.includes("already exists") ? "같은 이름의 스타일이 있어요." : failure.message; }
   }
 }

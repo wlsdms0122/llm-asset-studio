@@ -33,12 +33,14 @@ import re
 import shutil
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 import workspace
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
-STYLE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
+# Letters of any script, digits, and hyphens, starting with a letter or digit. Lowercase, so no two names differ only by case on a case-insensitive disk.
+STYLE_NAME = re.compile(r"[^\W_](?:[^\W_]|-){1,40}")
 
 
 class StyleError(Exception):
@@ -53,8 +55,9 @@ class Style:
 
     @classmethod
     def named(cls, styles, name):
-        if not STYLE_NAME.match(name or ""):
-            raise StyleError("a style name is lowercase letters, digits, and hyphens")
+        name = unicodedata.normalize("NFC", name or "")
+        if not STYLE_NAME.fullmatch(name) or name != name.lower():
+            raise StyleError("a style name is letters of any script (lowercase where the script has case), digits, and hyphens")
         return cls(Path(styles) / name)
 
     @classmethod

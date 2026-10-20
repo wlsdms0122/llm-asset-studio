@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 import zlib
+from urllib.parse import quote
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent / "engine"
@@ -193,8 +194,10 @@ def server(workspace, generate):
         check("opens a generate session in ideation", status == 200 and state["view"]["kind"] == "discover" and state["session"]["ideation"])
         check("a session that only drew is not an ideation", not next(session for session in state["sessions"] if session["id"] == body["session"])["ideation"])
         check("deletes a session", post("/api/sessions/delete", {"style": "demo", "session": body["session"]})[0] == 200)
-        check("renames a style", post("/api/styles/rename", {"style": "demo", "name": "demo-two"})[0] == 200 and (workspace / "styles/demo-two/style.md").read_text().startswith("# demo-two"))
-        check("deletes a style", post("/api/styles/delete", {"style": "demo-two"})[0] == 200 and not (workspace / "styles/demo-two").exists() and not (workspace / "sessions/demo-two").exists())
+        check("a name with capitals is refused", post("/api/styles/rename", {"style": "demo", "name": "Demo"})[0] == 400)
+        check("renames a style, to a Korean name", post("/api/styles/rename", {"style": "demo", "name": "데모-둘"})[0] == 200 and (workspace / "styles/데모-둘/style.md").read_text().startswith("# 데모-둘"))
+        check("a Korean-named style's state", get(f"/api/state?style={quote('데모-둘')}")[0] == 200)
+        check("deletes a style", post("/api/styles/delete", {"style": "데모-둘"})[0] == 200 and not (workspace / "styles/데모-둘").exists() and not (workspace / "sessions/데모-둘").exists())
     finally:
         process.terminate()
         process.wait()
