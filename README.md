@@ -22,7 +22,7 @@ Python 3.11 or later. `sheet` needs Pillow. `cutout` needs macOS 14 or later and
 
 ```
 open-package studio                       # the web studio on http://127.0.0.1:8770
-open-package session <command> ...        # sessions and rounds: new, open, next, publish, show, answer, confirm, add-model, delete, watch
+open-package session <command> ...        # sessions and rounds: new, open, next, publish, show, answer, confirm, add-model, rename, delete, watch
 open-package generate <session> ...       # draw into a session through OpenRouter
 open-package style <command> ...          # changes to a style: rename, delete, reference-add, reference-remove, use, model-remove
 open-package sheet <session>              # the latest round as one numbered image, for the conversation

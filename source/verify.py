@@ -103,6 +103,13 @@ def lifecycle(workspace):
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "generate")
     archive = (workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()
     check("generate images are archived", any(json.loads(line)["kind"] == "generate" for line in archive))
+    check("a board does not go to ideation", engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--comment", "talk", "--decision", "discover", ok=False).returncode != 0)
+    engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--picked", "1", "--request", "a bigger cup", "--decision", "refine")
+    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", generate, "generate", [(200, 200, 60)])), "--kind", "generate")
+    board = json.loads(engine(workspace, "session.py", "show", f"sessions/demo/{generate}").stdout)["candidates"]
+    check("a refined image names the attempt it was drawn from", board[0]["refined_from"] is None and board[1]["refined_from"] == board[0]["path"])
+    engine(workspace, "session.py", "rename", f"sessions/demo/{generate}", "  the  cup ")
+    check("a session keeps the name the user gave it", json.loads((workspace / f"sessions/demo/{generate}/session.json").read_text())["name"] == "the cup")
 
     if sys.platform == "darwin" and shutil.which("swift"):
         subject = workspace / "subject.png"
@@ -140,29 +147,27 @@ def lifecycle(workspace):
 
 
 def image_talk(workspace):
-    """A generate session that talks first: the user goes to the talk, the agent writes brief.md, and the board draws from it."""
-    talk = Path(engine(workspace, "session.py", "open", "styles/demo", "generate").stdout.strip())
+    """An ideation session: the agent works out the image in conversation, writes brief.md, and draws it there with the style."""
+    talk = Path(engine(workspace, "session.py", "open", "styles/demo", "ideation").stdout.strip())
     session = f"sessions/demo/{talk.name}"
     archived = len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines())
-    engine(workspace, "session.py", "answer", session, "--decision", "discover", "--comment", "an icon, no idea what to draw")
+    engine(workspace, "session.py", "answer", session, "--comment", "an icon, no idea what to draw")
     round_directory = draw(workspace, "demo", talk.name, "discover", [(250, 200, 0), (0, 120, 250)])
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "discover", "--note", "which idea?", "--describe", "a sun", "--describe", "a drop")
     check("talk candidates are not archived", len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()) == archived)
-    check("a generate session's talk does not go to sample", engine(workspace, "session.py", "answer", session, "--decision", "sample", ok=False).returncode != 0)
+    check("ideation does not go to sample", engine(workspace, "session.py", "answer", session, "--decision", "sample", ok=False).returncode != 0)
     check("drawing waits for a brief", engine(workspace, "session.py", "answer", session, "--picked", "1", "--decision", "generate", ok=False).returncode != 0)
     engine(workspace, "session.py", "answer", session, "--picked", "1", "--comment", "the sun")
     (talk / "brief.md").write_text("# A sun icon\n\nUse: an app icon.\n")
     engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "discover", "--note", "a sun, centered")
+    check("ideation holds no board", engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "generate", ok=False).returncode != 0)
     engine(workspace, "session.py", "answer", session, "--decision", "generate")
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "generate", [(250, 220, 0)], "other/model")), "--kind", "generate")
-    board = json.loads(engine(workspace, "session.py", "show", session).stdout)
-    check("the board draws from the brief", board["kind"] == "generate" and board["brief"].startswith("# A sun icon") and len(board["candidates"]) == 1)
-    engine(workspace, "session.py", "answer", session, "--decision", "discover", "--comment", "a smaller sun")
     archived = len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines())
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "discover", [(250, 240, 0)], "other/model")), "--kind", "discover", "--note", "smaller, then")
+    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "discover", [(250, 220, 0)], "other/model")), "--kind", "discover", "--note", "drawn from the brief")
+    drawn = json.loads(engine(workspace, "session.py", "show", session).stdout)
+    check("ideation draws from the brief in the conversation", drawn["kind"] == "discover" and drawn["brief"].startswith("# A sun icon") and len(drawn["candidates"]) == 1)
     check("a talk candidate drawn with the style is archived", len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()) == archived + 1)
-    thread = json.loads(engine(workspace, "session.py", "show", session).stdout)["thread"]
-    check("the talk shows the board's question and what the board drew", [turn["kind"] for turn in thread] == ["generate", "discover", "discover", "generate", "discover"] and thread[0]["message"] and len(thread[3]["candidates"]) == 1)
+    check("the talk keeps every turn", [turn["kind"] for turn in drawn["thread"]] == ["discover"] * 4 and drawn["thread"][0]["message"])
 
 
 def key(workspace):
@@ -212,10 +217,11 @@ def server(workspace, generate):
         check("a plain text post is refused", post("/api/styles/delete", {"style": "demo"}, "text/plain")[0] == 415)
         status, body = post("/api/sessions", {"style": "demo", "kind": "generate"})
         check("opens a generate session", status == 200 and (workspace / "sessions/demo" / body["session"]).is_dir())
-        status, opened = post("/api/sessions", {"style": "demo", "kind": "generate", "ideation": True})
+        status, opened = post("/api/sessions", {"style": "demo", "kind": "ideation"})
         state = json.loads(get(f"/api/state?style=demo&session={opened.get('session')}")[1])
-        check("opens a generate session in ideation", status == 200 and state["view"]["kind"] == "discover" and state["session"]["ideation"])
-        check("a session that only drew is not an ideation", not next(session for session in state["sessions"] if session["id"] == body["session"])["ideation"])
+        check("opens an ideation session", status == 200 and state["view"]["kind"] == "discover" and state["session"]["kind"] == "ideation")
+        check("renames a session", post("/api/sessions/rename", {"style": "demo", "session": body["session"], "name": "mugs"})[0] == 200 and next(session for session in json.loads(get("/api/state?style=demo")[1])["sessions"] if session["id"] == body["session"])["title"] == "mugs")
+        check("an empty session name is refused", post("/api/sessions/rename", {"style": "demo", "session": body["session"], "name": " "})[0] == 400)
         check("deletes a session", post("/api/sessions/delete", {"style": "demo", "session": body["session"]})[0] == 200)
         check("a name with capitals is refused", post("/api/styles/rename", {"style": "demo", "name": "Demo"})[0] == 400)
         check("renames a style, to a Korean name", post("/api/styles/rename", {"style": "demo", "name": "데모-둘"})[0] == 200 and (workspace / "styles/데모-둘/style.md").read_text().startswith("# 데모-둘"))

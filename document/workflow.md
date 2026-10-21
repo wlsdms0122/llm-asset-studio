@@ -9,7 +9,7 @@ A style is made in one make session (discover, sample, confirm) and then used in
 1. discover: one conversation that makes the style. The user describes what they want and attaches images; the agent describes the style back in plain words and writes it into `style.md` in full detail, shows candidate images when a picture settles a question faster than words, and asks the questions that change the image most. The user replies, attaches more, and picks candidates with a reason. When the agent believes the style is pinned down it says so, with the description, and proposes sampling; moving on (`sample`) is the user's call. See Discovering a style.
 2. sample: the agent picks the model, writes `prompting/<model>.md` and `model`, and the user tries the style on their own requests, one free-form request and one image at a time. Each image is shown with the request and the prompt written from it. No reference images are attached, so a sample tests whether the words alone hold the style. The user asks for another (`request`), goes back to the conversation (`discover`), which continues where it left off, or moves on (`confirm`).
 3. confirm: every sample image is offered as a reference, and the user picks the ones that are the style. When the picks are too few or too alike to teach the style (see References), or the user asks for more, the agent adds a few images, labeled as added, in a new confirm round that opens with the earlier picks still picked. On `done` the agent runs `session.py confirm`: the picks become `references/`, they are archived, and the make session is removed.
-4. generate: making images with the confirmed style, in generate sessions. The user opens one, describes an image, then refines it by picking the attempt to build on and saying what to change, or starts a new one. When the user does not know yet what the image should be, the session starts in ideation instead, where the agent works the image out with the user as a designer would (see Ideation). Every image made with the style is archived the moment it is shown. A session stays as a thread the user comes back to, until the user deletes it; deleting removes its rounds, never the archived images.
+4. generate and ideation: making images with the confirmed style. A generate session is the board: the user describes an image, then refines it by picking the attempt to build on and saying what to change, or starts a new one. An ideation session is the conversation, for a user who does not know yet what the image should be: the agent works the image out with the user as a designer would and draws it there (see Ideation). A session stays what it opened as. Every image made with the style is archived the moment it is shown. A session stays as a thread the user comes back to, until the user deletes it; the user may give it a name, and deleting removes its rounds, never the archived images.
 5. curating: the user adds images to the references and takes them out at any time, from the archive, from a session, or by upload (see References). `style.md` stays as confirmed. Adding a model runs a model session (see Prompting per model), and the user picks which of the style's models images are made with, or removes one that is not in use (`style.py model-remove`).
 6. new from a style: changing how a confirmed style looks makes a new style from it (`session.py new <styles> <name> --from <style>`). It starts with the base's `style.md`, and the base's references as the images of its first discover round, then runs the same discover, sample, and confirm. The user may fix a detail or turn the style somewhere else. The base's prompting files are not copied, since they translate words that are about to change; at sample the agent writes this style's prompting file, starting from the base's when it keeps the same model.
 
@@ -18,6 +18,13 @@ Each stage goes forward on the user's word and back one stage when the user want
 ## Discovering a style
 
 The user cannot be asked to name a style; few people outside design can. They can describe what they want, show images they like, and recognize the result. So the agent writes the style from that material, and every image shown during discovery exists to settle a question about the words.
+
+Most people also do not separate a style from a picture. Asked for a style, they describe the image they need ("an icon for my budget app", "a cozy cafe scene"). The agent's first job is to make the difference plain, in the user's words, without lecturing:
+
+- A style is how every picture made with it is drawn, whatever it shows: the medium (flat vector, watercolor, clay 3D, pixel art), shapes and line, light and shadow, color, surface and texture, detail, and framing. What a picture shows is decided later, for each image. The first message after a description that names content says this in a sentence or two and turns the content into style questions ("for a budget app icon, should it look flat and graphic like a road sign, soft and round like a toy, or drawn by hand?").
+- Every question about the look names the direction it is on and spells out the options as plain contrasts, each with what it changes in the picture: "hard edges and flat color (clean, reads small) or soft shading with a light source (friendly, more depth)?" Never a bare style name.
+- Every candidate image is labeled with the style difference it shows and the property the user should compare, and the note says what stays the same across them and what to ignore (the subject, small defects of the draft model). "1 and 2 differ only in the outline: none, or a thin dark line" lets the user answer about the style; four unlabeled pictures invite a pick by subject.
+- A vague first answer ("make it pretty", "something modern") is answered with talk, not images: the agent names two or three plain directions it could mean, each in one line with an everyday example, and asks which is closer, or asks for an image the user likes. Candidates come once there is a direction to test, so the first images already differ on a question the user understands.
 
 - Each turn the agent's message (on the web, the round's note) describes the style in the user's language and plain words, says what changed since the last turn, and asks at most two or three questions, the ones that change the image most first. `style.md` holds the same description in full detail.
 - Never ask the user for vocabulary. Ask with the options spelled out, as "this, not that": "soft matte like clay, or shiny like toy plastic?" After a pick, ask why with two or three plain reasons to choose from; a pick with a reason says far more than a pick alone.
@@ -92,9 +99,9 @@ The images a model session draws are made with the confirmed style, so they are 
 
 ## Ideation
 
-A generate session opens one of two ways, chosen on the style's page: "new image" opens on the board for a user who knows what to make, and "new ideation" opens in ideation for one who does not (`session.py open <style> generate --ideation`). It is the same session either way: the board's `discover` goes to ideation, ideation's `generate` goes to the board, and a session that has talked is listed as an ideation.
+The style's page opens two kinds of session: "new image" opens a generate session, a board for a user who knows what to make, and "new ideation" opens an ideation session, a conversation for one who does not (`session.py open <style> ideation`). Each stays what it opened as; neither turns into the other.
 
-In ideation the agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the session's `brief.md` as the image takes shape, the way discovering a style writes `style.md`. Every ideation candidate is drawn with the draft model. When the image is concrete the agent proposes drawing it with the style's model; on the user's `generate` it writes a prompt from `brief.md`, `style.md`, and the prompting file, draws one image with the references, and publishes a generate round whose request is the brief's first line. Going back to ideation continues the conversation, with what the board drew shown in it. How the designer works and what the brief holds are in `ideation.md`.
+In ideation the agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the session's `brief.md` as the image takes shape, the way discovering a style writes `style.md`. Ideas are drawn with the draft model. When the image is concrete the agent proposes drawing it with the style's model; on the user's `generate` it writes a prompt from `brief.md`, `style.md`, and the prompting file, draws one image with the references, and shows it in the next discover round with what it has to say about it. The conversation goes on from there: the user reacts to the drawn image, the agent updates the brief and draws again. Images drawn with the style's model are archived like any other. How the designer works and what the brief holds are in `ideation.md`.
 
 ## Rounds and surfaces
 
@@ -102,15 +109,15 @@ A round is one thing shown to the user and the user's answer to it. Its records 
 
 | kind | shows | the user gives |
 |---|---|---|
-| discover | the conversation with its candidates and attachments, and what it writes (`style.md`, or in ideation `brief.md`) | a reply with attachments, picks with reasons, or the next stage (`sample`, or in ideation `generate`) |
+| discover | the conversation with its candidates and attachments, and what it writes (`style.md`, or in ideation `brief.md`) | a reply with attachments, picks with reasons, `sample` (make), or `generate` (ideation: draw the brief with the style's model) |
 | sample | `style.md`, the prompting file, and request / prompt / image for each image | `request`, `discover`, or `confirm` |
 | confirm | every sample image and any the agent added | picks and `done`, a reply asking for more, or `sample` |
-| generate | `style.md`, the references, `brief.md` when the session has one, and every attempt with its request and prompt | `refine` (picked attempt + request), `new`, or `discover` |
+| generate | `style.md`, the references, and every attempt with its request, the attempt it was refined from, and its prompt | `refine` (picked attempt + request) or `new` |
 | model | the model's draft prompting file, the references, and every image with its request and prompt | `request` or `done` |
 
-Sessions live in `sessions/<style>/<session id>/`, next to the style, so the style folder holds only the style and its records. `session.json` says the kind of session (make, generate, model), when it started, and for a model session which model; a generate session that has talked keeps its `brief.md` beside it. Each round is a folder in the session: `round.json` is written once by the agent and never rewritten, since the user has seen it; it carries a copy of `style.md` (and `brief.md` in a generate session, and for boards the model and its prompting file) as they were shown, which is the history of the words. Publishing a board or confirm round carries over the images of the last round of the same kind in that session. Boards (sample, generate, model) read in the order images were drawn, the newest last; a confirm round shows the images the agent adds first, also carries every sample image, and starts with the user's picks from the last confirm round still picked. `feedback.json` is written once by a surface. Images the user attaches belong to the answer they are sent with, like a file attached to a message: they wait in the round's `attachments/` while it is open, `feedback.json` lists them, and the conversation shows them with that reply. Candidate numbers follow the display order, which a blind round shuffles with the round number as seed, so the page, `sheet.py`, and `session.py answer` agree on what "3" means. Confirming a style, adding a model, or the user deleting a session removes the session folder.
+Sessions live in `sessions/<style>/<session id>/`, next to the style, so the style folder holds only the style and its records. `session.json` says the kind of session (make, generate, ideation, model), when it started, the name the user gave it if any, and for a model session which model; an ideation session keeps its `brief.md` beside it. Each round is a folder in the session: `round.json` is written once by the agent and never rewritten, since the user has seen it; it carries a copy of `style.md` (and `brief.md` in ideation, and for boards the model and its prompting file) as they were shown, which is the history of the words. Publishing a board or confirm round carries over the images of the last round of the same kind in that session. Boards (sample, generate, model) read in the order images were drawn, the newest last; a confirm round shows the images the agent adds first, also carries every sample image, and starts with the user's picks from the last confirm round still picked. `feedback.json` is written once by a surface. Images the user attaches belong to the answer they are sent with, like a file attached to a message: they wait in the round's `attachments/` while it is open, `feedback.json` lists them, and the conversation shows them with that reply. Candidate numbers follow the display order, which a blind round shuffles with the round number as seed, so the page, `sheet.py`, and `session.py answer` agree on what "3" means. Confirming a style, adding a model, or the user deleting a session removes the session folder.
 
-- Web: `open-package studio` serves the studio (`source/web/`) for every style on `127.0.0.1:8770`. The home lists the styles and creates new ones; a right click on a style renames it, makes a new style from it, or deletes it. A style being made opens on its make session; a confirmed style opens on its overview (the model in use, the sessions, the references, recent images) with "new generate session" and "add model", and each session opens at its own address. Any image can be added to the references wherever it is shown; references are taken out only from the reference list. Being a reference is not shown on other images. The model picker shows each model's price for one 1K image (what it has cost here when it has been used) and offers only models that take as many references as the style has. The archive lists every archived image and downloads several at once. Pages poll, so an open tab follows the rounds. Review verdicts are not shown before the user answers.
+- Web: `open-package studio` serves the studio (`source/web/`) for every style on `127.0.0.1:8770`. The home lists the styles and creates new ones; a right click on a style renames it, makes a new style from it, or deletes it. A style being made opens on its make session; a confirmed style opens on its overview (the model in use, the sessions, the references, recent images) with "new image", "new ideation", and "add model", and each session opens at its own address, where the user can rename it. Any image can be added to the references wherever it is shown; references are taken out only from the reference list. Being a reference is not shown on other images. The model picker shows each model's price for one 1K image (what it has cost here when it has been used) and offers only models that take as many references as the style has. The archive lists every archived image and downloads several at once. Pages poll, so an open tab follows the rounds. Review verdicts are not shown before the user answers.
 - Conversation: the agent sends `sheet.py` output and records the user's reply with `session.py answer`.
 
 The server writes only records: answers, new styles with their make session, new generate sessions (with an empty board) and model sessions (with none yet), images attached to or taken off the answer being written, and the user's own changes (renaming or deleting a style, deleting a session, references, the model in use). Generation always goes through the agent.
@@ -169,14 +176,14 @@ open-package session publish "$(open-package session next $G)" --kind generate -
 open-package cutout $G "$G/<round>/<image>" --request "<the user's words>"
 open-package session publish "$(open-package session next $G)" --kind generate --describe "..."
 
-# ideation: the user opens it on the web or reaches it from the board; in conversation the agent opens one
-# $G/brief.md is written once the image has a shape, and from then on the user can move to generate
-G=$(open-package session open styles/<style> generate --ideation)
-open-package generate $G --model $D --prompt-file /tmp/1.md --into c1 --tag discover
-open-package session publish "$(open-package session next $G)" --kind discover --note "<the need as understood, the ideas and why, the recommendation, the decisions>" --describe "<idea 1 and why it fits>"
-# after the user's generate: draw from brief.md, with its heading as the request
-open-package generate $G --references --request "<brief.md heading>" --prompt-file /tmp/prompt.md --tag generate
-open-package session publish "$(open-package session next $G)" --kind generate --describe "..."
+# ideation: the user opens it on the web; in conversation the agent opens one
+# $I/brief.md is written once the image has a shape, and from then on the user can ask for it drawn (generate)
+I=$(open-package session open styles/<style> ideation)
+open-package generate $I --model $D --prompt-file /tmp/1.md --into c1 --tag discover
+open-package session publish "$(open-package session next $I)" --kind discover --note "<the need as understood, the ideas and why, the recommendation, the decisions>" --describe "<idea 1 and why it fits>"
+# after the user's generate: draw from brief.md with the style, into the conversation
+open-package generate $I --references --request "<brief.md heading>" --prompt-file /tmp/prompt.md --tag discover
+open-package session publish "$(open-package session next $I)" --kind discover --note "<what was drawn, what to look at>" --describe "..."
 
 # model: write $M/prompting.md, then draw with the references
 M=$(open-package session open styles/<style> model --model <model id>)
@@ -190,6 +197,7 @@ open-package style reference-remove styles/<style> 03.jpg
 open-package style use styles/<style> <model id>
 open-package style model-remove styles/<style> <model id>
 open-package style rename styles/<style> <new name>
+open-package session rename $G "<the name the user gave>"
 open-package session delete $G
 
 # conversation surface
@@ -199,8 +207,8 @@ open-package session answer $S --picked 2 --note "2=the shadow is softer" --note
 open-package session answer $S --decision sample
 open-package session answer $S --decision request --request "a warm feel, a teddy bear and a pot"
 open-package session answer $S --picked 1,3,4 --decision done
-open-package session answer $G --comment "an icon for a weather app, no idea what to draw"
-open-package session answer $G --picked 2 --decision generate
+open-package session answer $I --comment "an icon for a weather app, no idea what to draw"
+open-package session answer $I --picked 2 --decision generate
 
 # what a surface sees
 open-package session show $S

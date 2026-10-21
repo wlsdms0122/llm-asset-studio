@@ -3,10 +3,10 @@
 
 The page lists the styles, opens one, and shows its sessions. The server writes only records, through
 session.py and style.py: the user's answers, new styles (empty or from a confirmed one) with their
-make session, new generate and model sessions, images attached to or taken off the answer being
-written, and the user's own changes to a style (its name, its references, the model it uses, deleting
-it or a session). It never generates. The agent watches sessions/*/*/*/feedback.json and
-sessions/*/*/session.json, does the work, and publishes the next round; the open page follows on its own.
+make session, new generate, ideation, and model sessions, images attached to or taken off the answer
+being written, and the user's own changes (a style's name, its references, the model it uses, deleting
+it, a session's name, deleting a session). It never generates. The agent waits for answers with
+`session.py watch`, does the work, and publishes the next round; the open page follows on its own.
 """
 
 import argparse
@@ -172,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
                 style.delete()
                 return self.send_json(200, {"ok": True})
             if path == "/api/sessions":
-                session = open_session(style, body.get("kind"), body.get("model") or None, bool(body.get("ideation")))
+                session = open_session(style, body.get("kind"), body.get("model") or None)
                 return self.send_json(200, {"session": session.id})
             if path == "/api/model":
                 check_references(style, len(style.references()), body.get("model", ""))
@@ -188,6 +188,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"ok": True})
 
             session = self.session(style, body.get("session"))
+            if path == "/api/sessions/rename":
+                session.rename(body.get("name", ""))
+                return self.send_json(200, {"ok": True})
             if path == "/api/sessions/delete":
                 session.delete()
                 return self.send_json(200, {"ok": True})

@@ -1,6 +1,6 @@
 # Ideation
 
-How the agent works out what an image should be when the user does not know yet. Ideation is the talk of a generate session (its discover rounds); the commands and the records are in `workflow.md`.
+How the agent works out what an image should be when the user does not know yet. Ideation is a session of its own, a conversation of discover rounds; the commands and the records are in `workflow.md`.
 
 ## The role
 
@@ -44,7 +44,7 @@ The first message restates the need as a design problem in one or two plain sent
 - Every ideation candidate comes from the draft model (`models.md`). A draft costs nothing or close to it, so the agent can show more and iterate faster: more ideas in the first round, more versions while developing, a fresh image instead of a long explanation.
 - The draft model does not draw the style. Each message says what to look at (the idea, the subject, the layout) and what to ignore (the rendering), and each prompt describes the idea in the style's subject terms so the only difference from the final image is the rendering.
 - These are roughs, so they are not archived.
-- When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's `generate` is the go-ahead; from there the image is drawn with the style's model and references on the board, and every attempt is archived.
+- When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's `generate` is the go-ahead: the image is drawn with the style's model and references and shown in the conversation, and it is archived. The user's reaction to it goes on in the same conversation; a fix about the idea updates the brief, a fix about this image goes into the next prompt.
 
 ## The brief
 
