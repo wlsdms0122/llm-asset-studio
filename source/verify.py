@@ -6,6 +6,7 @@ sessions, removes a background, talks a generate session into a brief, curates r
 every page's state, and stores a key. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
 
+import base64
 import json
 import os
 import re
@@ -216,6 +217,9 @@ def server(workspace, generate):
         check("a foreign host is refused", get("/api/styles", {"Host": "example.com"})[0] == 403)
         check("a plain text post is refused", post("/api/styles/delete", {"style": "demo"}, "text/plain")[0] == 415)
         status, body = post("/api/sessions", {"style": "demo", "kind": "generate"})
+        png(workspace / "upload.png", (10, 200, 10))
+        status_attached, attached = post("/api/attach", {"style": "demo", "session": body["session"], "name": "스크린샷 2026-10-22 오전 1.02.03.png", "data": base64.b64encode((workspace / "upload.png").read_bytes()).decode()})
+        check("an image with a Korean name is attached as a png", status_attached == 200 and attached["path"].endswith(".png"))
         check("opens a generate session", status == 200 and (workspace / "sessions/demo" / body["session"]).is_dir())
         status, opened = post("/api/sessions", {"style": "demo", "kind": "ideation"})
         state = json.loads(get(f"/api/state?style=demo&session={opened.get('session')}")[1])

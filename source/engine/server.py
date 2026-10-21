@@ -256,9 +256,11 @@ class Handler(BaseHTTPRequestHandler):
             upload.unlink(missing_ok=True)
 
     def upload(self, body):
-        name = re.sub(r"[^A-Za-z0-9._-]", "-", Path(body.get("name", "")).name).strip("-.")
-        if not name or Path(name).suffix.lower() not in IMAGE_SUFFIXES:
+        # The name keeps its letters in any script; only the extension decides whether it is an image.
+        original = Path(Path(body.get("name", "")).name)
+        if original.suffix.lower() not in IMAGE_SUFFIXES:
             raise StyleError("attach a png, jpg, or webp image")
+        name = (re.sub(r"[^\w.-]", "-", original.stem).strip("-.") or "image") + original.suffix.lower()
         try:
             content = base64.b64decode(body.get("data", ""), validate=True)
         except binascii.Error:
