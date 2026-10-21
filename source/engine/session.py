@@ -54,6 +54,7 @@ Commands:
   confirm <session>                      turn the user's picks into references/ and end the make session
   add-model <session>                    add the model a finished model session tried, and end it
   delete <session>                       delete a session
+  watch                                  wait until a session is the agent's turn, and print the folders of all that are
 """
 
 import argparse
@@ -548,6 +549,16 @@ def open_session(style, kind, model=None, ideation=False):
     return session
 
 
+def agents_turn(styles):
+    """Every session the agent owes a round: one whose last round the user answered, or a model session with none yet."""
+    while True:
+        try:
+            return [session for style in Style.all(styles) for session in Session.all(style) if not session.summary()["waiting"]]
+        except OSError:
+            # A session deleted or confirmed while it was being read; the next look finds it gone.
+            time.sleep(0.2)
+
+
 def confirm(session):
     """Make the user's picks from the answered confirm round the style's references, and end the make session."""
     style = session.style
@@ -598,6 +609,11 @@ def main():
             if not style.exists():
                 raise StyleError(f"no style at {arguments.style}")
             print(open_session(style, arguments.kind, arguments.model, arguments.ideation).directory)
+        elif arguments.command == "watch":
+            while not (sessions := agents_turn(workspace.STYLES)):
+                time.sleep(2)
+            for session in sessions:
+                print(session.style.relative(session.directory))
         elif arguments.command == "publish":
             directory = Path(arguments.directory).resolve()
             if not directory.is_dir():
@@ -647,6 +663,7 @@ def parse_arguments():
     opening.add_argument("--model", help="model session: the OpenRouter model id to add")
     opening.add_argument("--ideation", action="store_true", help="generate session: open in ideation instead of on the board")
 
+    commands.add_parser("watch")
     for command in ("next", "show", "confirm", "add-model", "delete"):
         commands.add_parser(command).add_argument("session", help="the session folder, such as sessions/app-icon/20261011-230012")
 

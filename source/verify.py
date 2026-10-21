@@ -82,6 +82,7 @@ def lifecycle(workspace):
     make = next((workspace / "sessions" / "demo").iterdir()).name
     session = f"sessions/demo/{make}"
     engine(workspace, "session.py", "answer", session, "--comment", "warm")
+    check("watch hands over a session the user answered", engine(workspace, "session.py", "watch").stdout.split() == [session])
     (workspace / "styles/demo/style.md").write_text("# demo\n\nA test style.\n")
     round_directory = draw(workspace, "demo", make, "discover", [(200, 40, 40), (40, 40, 200)])
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "discover", "--describe", "one", "--describe", "two")

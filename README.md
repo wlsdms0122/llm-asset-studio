@@ -12,7 +12,7 @@ This directory is an [open-package](https://github.com/wlsdms0122/open-package).
 
 Have the agent read `document/workflow.md` first. It has the stages of a style, how sessions and rounds work, and every command in order. The rest of `document/` is read along the way.
 
-With the web studio, the agent starts `open-package studio` and keeps watching `sessions/*/*/*/feedback.json` and `sessions/*/*/session.json` in the workspace. The studio only writes down your answers. When one arrives, the agent draws and publishes the next round, so it needs to be able to keep a watcher running in the background. If it can't, stay in the conversation: the agent sends a numbered sheet and you reply there.
+The web studio is the default. The agent starts `open-package studio`, and everything it has to show or ask you goes onto the page as a round; the conversation only says that a round is up. The studio only writes down your answers. The agent waits for them with `open-package session watch` running in the background, then draws and publishes the next round. If it can't keep a command running in the background, or you ask for it, stay in the conversation: the agent sends a numbered sheet and you reply there.
 
 Store the OpenRouter key once with `open-package key`. `open-package verify` runs the engine and the studio end to end in a throwaway workspace and spends nothing, so run it first.
 
@@ -22,7 +22,7 @@ Python 3.11 or later. `sheet` needs Pillow. `cutout` needs macOS 14 or later and
 
 ```
 open-package studio                       # the web studio on http://127.0.0.1:8770
-open-package session <command> ...        # sessions and rounds: new, open, next, publish, show, answer, confirm, add-model, delete
+open-package session <command> ...        # sessions and rounds: new, open, next, publish, show, answer, confirm, add-model, delete, watch
 open-package generate <session> ...       # draw into a session through OpenRouter
 open-package style <command> ...          # changes to a style: rename, delete, reference-add, reference-remove, use, model-remove
 open-package sheet <session>              # the latest round as one numbered image, for the conversation

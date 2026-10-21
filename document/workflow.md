@@ -19,7 +19,7 @@ Each stage goes forward on the user's word and back one stage when the user want
 
 The user cannot be asked to name a style; few people outside design can. They can describe what they want, show images they like, and recognize the result. So the agent writes the style from that material, and every image shown during discovery exists to settle a question about the words.
 
-- Each turn the agent's message describes the style in the user's language and plain words, says what changed since the last turn, and asks at most two or three questions, the ones that change the image most first. `style.md` holds the same description in full detail.
+- Each turn the agent's message (on the web, the round's note) describes the style in the user's language and plain words, says what changed since the last turn, and asks at most two or three questions, the ones that change the image most first. `style.md` holds the same description in full detail.
 - Never ask the user for vocabulary. Ask with the options spelled out, as "this, not that": "soft matte like clay, or shiny like toy plastic?" After a pick, ask why with two or three plain reasons to choose from; a pick with a reason says far more than a pick alone.
 - A note can sit on any candidate, picked or not: a reason for a pick, or what falls short in one the user passed over. Picks and notes are read separately.
 - Read every attached image at full resolution and describe what most of them share; what only one has is that image, not the style. Name conflicts as a question. Mark what was inferred, especially material and texture, and ask before relying on it: small or compressed images invent texture.
@@ -113,15 +113,28 @@ Sessions live in `sessions/<style>/<session id>/`, next to the style, so the sty
 - Web: `open-package studio` serves the studio (`source/web/`) for every style on `127.0.0.1:8770`. The home lists the styles and creates new ones; a right click on a style renames it, makes a new style from it, or deletes it. A style being made opens on its make session; a confirmed style opens on its overview (the model in use, the sessions, the references, recent images) with "new generate session" and "add model", and each session opens at its own address. Any image can be added to the references wherever it is shown; references are taken out only from the reference list. Being a reference is not shown on other images. The model picker shows each model's price for one 1K image (what it has cost here when it has been used) and offers only models that take as many references as the style has. The archive lists every archived image and downloads several at once. Pages poll, so an open tab follows the rounds. Review verdicts are not shown before the user answers.
 - Conversation: the agent sends `sheet.py` output and records the user's reply with `session.py answer`.
 
-Which surface to use is settled when the user starts: for the web, the agent starts the studio once and watches every `sessions/*/*/*/feedback.json` and `sessions/*/*/session.json` for as long as the studio is open, including after a style is confirmed, since generate requests and new model sessions arrive the same way. A new `session.json` of kind model is the user asking for that model. Otherwise the same steps run in conversation. The server writes only records: answers, new styles with their make session, new generate sessions (with an empty board) and model sessions (with none yet), images attached to or taken off the answer being written, and the user's own changes (renaming or deleting a style, deleting a session, references, the model in use). Generation always goes through the agent.
+The server writes only records: answers, new styles with their make session, new generate sessions (with an empty board) and model sessions (with none yet), images attached to or taken off the answer being written, and the user's own changes (renaming or deleting a style, deleting a session, references, the model in use). Generation always goes through the agent.
+
+## Working on the web
+
+The web studio is the default surface. When the user starts, the agent starts `open-package studio`, gives its address, and works there until the user ends. The conversation surface is used when the user asks for it, or when the agent cannot keep a command running in the background; the agent says which surface it is using and why.
+
+On the web, the published round is the agent's message. Everything the user is meant to read or answer goes into it: the style or the image in plain words, what changed, and the questions (`publish --note`), and what each image tests or what the agent has to say about it (`--describe`). A user looking at the studio does not read the conversation, and an answer given in the studio is an answer to the round, not to anything said beside it. So the conversation gets one line saying which round is up and where, and nothing the user has to answer:
+
+- Asking for the yes to a paid draft model, or a question before any image can be drawn, is a discover round with the question as its note and no images.
+- Proposing the next stage (sampling, drawing from the brief) goes in the note of the round that shows why.
+- When the user writes in the conversation about a session while the studio is in use, the agent records it with `session answer` and replies with the next round, so the page keeps the whole thread. Questions that belong to no session (which styles there are, what a model costs) are answered in the conversation.
+
+The agent waits for answers with `open-package session watch`, run in the background. It returns as soon as any session is the agent's turn (its last round is answered, or it is a model session with no round yet) and prints the folder of each one. For each folder the agent reads the answer (`session show`), does the work, and publishes the next round; then it runs `watch` again. `watch` looks at the records rather than at changes, so an answer that comes in while the agent is working is printed by the next run, and sessions already waiting when the agent starts are printed at once. It is run again for as long as the studio is open, including after a style is confirmed: generate requests and new model sessions (the user asking for that model) arrive the same way. A session the user deleted or renamed needs nothing from the agent.
 
 ## Usage
 
 Commands run as `open-package <command>` inside the workspace (`~/.config/asset-studio`, or `ASSET_STUDIO_HOME`), which holds `styles/`, `sessions/`, and the API key stored with `open-package key`. Paths are given relative to the workspace.
 
 ```
-# studio, left running
+# studio, left running, and the agent's wait for the next answer, run again after each round it publishes
 open-package studio
+open-package session watch
 
 # a new style, or one made from a confirmed style, starts with its make session and a discover round
 open-package session new <style>
