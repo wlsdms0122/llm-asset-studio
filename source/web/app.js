@@ -661,6 +661,15 @@ function priceLabel(model) {
   return t("{cost} / 1M tokens", { cost: `$${+(price.cost * 1e6).toFixed(2)}` }) + from;
 }
 
+// Whether one image always costs the same: a flat price per image, or one that changes with the options, the size, or the tokens.
+function billingLabel(model) {
+  const price = model.price;
+  if (!price || !price.cost) return null;
+  if (price.unit === "image") return price.varies ? t("Changes with options") : t("Fixed per image");
+  if (price.unit === "megapixel") return t("Changes with size");
+  return t("Changes with tokens");
+}
+
 async function loadCatalog() {
   if (!catalogModels) catalogModels = (await api("/api/catalog")).models;
   return catalogModels;
@@ -679,6 +688,7 @@ async function addModel() {
       value: model.id, title: model.name, detail: model.id,
       specs: [
         [t("Price"), priceLabel(model)],
+        billingLabel(model) ? [t("Billing"), billingLabel(model)] : null,
         [t("References"), t("Up to {count}", { count: model.references })],
         model.price && model.price.reference ? [t("Per reference"), money(model.price.reference)] : null
       ]

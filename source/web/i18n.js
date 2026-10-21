@@ -189,7 +189,12 @@ const KO = {
   "{cost} / 1M tokens": "100만 토큰당 {cost}",
   "Price": "가격",
   "Up to {count}": "최대 {count}장",
-  "Per reference": "레퍼런스 장당"
+  "Per reference": "레퍼런스 장당",
+  "Billing": "과금",
+  "Fixed per image": "장당 고정",
+  "Changes with options": "옵션마다 다름",
+  "Changes with size": "크기마다 다름",
+  "Changes with tokens": "토큰 수마다 다름"
 };
 
 // A viewer's choice is kept in this browser; without one, the browser's own language decides.
