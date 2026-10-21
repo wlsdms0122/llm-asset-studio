@@ -6,9 +6,8 @@
 
 const STAGES = [["discover", t("Style")], ["sample", t("Sample")], ["confirm", t("Confirm")]];
 const KIND_NAMES = { discover: t("Style"), sample: t("Sample"), confirm: t("Confirm"), generate: t("Generate"), model: t("Add model") };
-const SESSION_NAMES = { make: t("Making the style"), generate: t("Image"), model: t("Add model") };
-// A generate session is named by how it goes: making an image from a request, or ideation.
-const sessionName = session => session.ideation ? t("Ideation") : SESSION_NAMES[session.kind];
+const SESSION_NAMES = { make: t("Making the style"), generate: t("Image"), ideation: t("Ideation"), model: t("Add model") };
+const sessionName = session => SESSION_NAMES[session.kind];
 // What the agent is doing after each answer, shown until the next round arrives.
 const WAITING = { sample: t("Preparing the sample"), discover: t("Preparing the conversation"), confirm: t("Preparing reference candidates"), generate: t("Drawing"), request: t("Drawing"), done: t("Wrapping up"), refine: t("Drawing"), new: t("Drawing") };
 const CONTINUING = { discover: t("Reading your answer"), confirm: t("Making more candidates") };
@@ -58,6 +57,11 @@ let archiveData = null;
 let selecting = null;
 // The model list with prices, read once per page load; the server keeps it for a day.
 let catalogModels = null;
+// The composer under the stage lives as long as the round it answers, so what is typed, its height, and its images
+// stay put while the page redraws around it.
+let dockComposer = null;
+// What the stage has shown in this session; anything new after the first drawing comes in with a motion.
+let appeared = { place: null, keys: new Set(), primed: false };
 
 function freshDraft(key = null, picked = []) {
   return { key, picked: new Set(picked), notes: {}, comment: "", request: "" };
@@ -90,6 +94,7 @@ function go() {
   draft = freshDraft();
   panelTab = "work";
   selecting = null;
+  dockComposer = null;
   closeMenu();
   document.querySelectorAll("[data-nav]").forEach(link => link.classList.toggle("on", link.dataset.nav === route.name));
   fill($("view"), );
@@ -153,6 +158,22 @@ function newStyle(base = null) {
 }
 $("new-style").addEventListener("click", () => newStyle());
 fill($("language"), dropdown({ value: language, title: t("Language"), options: LANGUAGES.map(([value, label]) => ({ value, label })), onChange: setLanguage }));
+
+// The theme follows the system unless the viewer picks one; index.html applies a saved choice before the page draws.
+const THEMES = [["system", t("System")], ["light", t("Light")], ["dark", t("Dark")]];
+
+function renderTheme() {
+  const current = document.documentElement.dataset.theme || "system";
+  fill($("theme"), dropdown({ value: current, title: t("Theme"), options: THEMES.map(([value, label]) => ({ value, label })), onChange: setTheme }));
+}
+
+function setTheme(theme) {
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("theme", theme); } catch {}
+  renderTheme();
+}
+renderTheme();
 
 function renameStyle(style) {
   return askName({
@@ -474,7 +495,9 @@ function renderPanelHead() {
 
   fill($("panel-head"),
     h("a", { class: "back", href: inSession ? styleHash(data.style) : "#/", text: `← ${inSession ? data.style : t("Styles")}` }),
-    h("h1", { text: inSession ? session.title || sessionName(session) : data.style }),
+    inSession
+      ? h("div", { class: "title-row" }, [h("h1", { text: session.title || sessionName(session) }), tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true })])
+      : h("h1", { text: data.style }),
     inSession ? h("p", { class: "subtitle", text: t("{kind} session · started {when}", { kind: sessionName(session), when: when(session.started) }) }) : null,
     session && session.kind === "make" ? h("div", { class: "stepper" }, STAGES.map(([, name], index) => h("div", { class: `step${index < stage ? " done" : index === stage ? " now" : ""}`, text: name }))) : null,
     pills.length ? h("div", { class: "facts" }, pills) : null
@@ -508,7 +531,7 @@ function renderPanelBody() {
   const current = view();
   const body = $("panel-body");
   const actions = $("panel-actions");
-  fill($("dock"), );
+  if (!answering()) { dockComposer = null; fill($("dock"), ); }
   if (!data.session) return renderIdlePanel(body, actions);
   if (!current) {
     fill(body, workingNote(data.session.kind === "model" ? t("Writing the prompt guide for this model") : t("Getting ready")));
@@ -549,7 +572,7 @@ function renderIdlePanel(body, actions) {
   const image = button(t("New image"), { variant: "primary", grow: true });
   image.addEventListener("click", () => openSession("generate", null, image));
   const ideation = button(t("New ideation"), { grow: true });
-  ideation.addEventListener("click", () => openSession("generate", null, ideation, true));
+  ideation.addEventListener("click", () => openSession("ideation", null, ideation));
   fill(actions, ideation, image);
   if (!catalogModels) loadCatalog().then(() => { if ($("model-rows")) fill($("model-rows"), rowList(data.overview.models.map(modelRow))); }).catch(() => {});
 }
@@ -573,17 +596,31 @@ async function removeModel(model) {
 
 function sessionRow(session) {
   return listRow({
-    title: session.title || (session.kind === "generate" ? t("New {kind}", { kind: sessionName(session) }) : SESSION_NAMES[session.kind]),
+    title: session.title || (session.kind === "model" ? SESSION_NAMES.model : t("New {kind}", { kind: sessionName(session) })),
     detail: `${sessionName(session)} · ${when(session.updated)}`,
     onClick: () => { location.hash = styleHash(data.style, session.id); },
-    aside: h("div", { class: "row" }, [session.waiting ? null : pill(t("Working"), { tone: "accent", dot: "live" }), tool("trash", t("Delete session"), () => deleteSession(session), { quiet: true })])
+    aside: h("div", { class: "row" }, [
+      session.waiting ? null : pill(t("Working"), { tone: "accent", dot: "live" }),
+      tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true }),
+      tool("trash", t("Delete session"), () => deleteSession(session), { quiet: true })
+    ])
   });
 }
 
-async function openSession(sessionKind, model, trigger, ideation = false) {
+async function renameSession(session) {
+  let error = "";
+  for (;;) {
+    const name = await ask({ title: t("Rename session"), value: session.title || "", error, placeholder: t("Name"), confirm: t("Change"), input: "text" });
+    if (name == null || name === (session.title || "")) return;
+    try { await api("/api/sessions/rename", { style: data.style, session: session.id, name }); data = null; return load(); }
+    catch (failure) { error = failure.message; }
+  }
+}
+
+async function openSession(sessionKind, model, trigger) {
   if (trigger) trigger.disabled = true;
   try {
-    const opened = await api("/api/sessions", { style: data.style, kind: sessionKind, model, ideation });
+    const opened = await api("/api/sessions", { style: data.style, kind: sessionKind, model });
     location.hash = styleHash(data.style, opened.session);
   } catch (error) {
     toast(error.message, "error");
@@ -640,18 +677,48 @@ async function addModel() {
   if (model) openSession("model", model);
 }
 
-// The message box under the stage: the images attached to this answer, the text, and the button that sends it.
-function answerBox(key, placeholder, { attaching = true, sendTitle, onSend, onInput = null }) {
+// The message box under the stage, docked once per round: the text, the images that go with the answer, and send.
+// The draft field it writes is the request on boards and the reply in conversations.
+function answerBox(placeholder, { attaching = true, sendTitle, onSend }) {
   const current = view();
-  return composer({
-    value: draft[key], placeholder, sendTitle: `${sendTitle} (⌘↵)`, onSend,
-    onInput: value => { draft[key] = value; if (onInput) onInput(); },
-    attach: attaching ? attachButton() : null,
-    attachments: attaching ? current.attachments.map(path => thumb(path, { remove: () => detach(path) })) : []
-  });
+  const field = draftField();
+  const key = `${draftKey(current)}|${field}`;
+  if (!dockComposer || dockComposer.key !== key) {
+    dockComposer = composer({
+      value: draft[field], placeholder, sendTitle: `${sendTitle} (⌘↵)`, onSend,
+      onInput: value => { draft[field] = value; syncSend(); },
+      attach: attaching ? attachButton() : null
+    });
+    dockComposer.key = key;
+  }
+  if ($("dock").firstElementChild !== dockComposer) fill($("dock"), dockComposer);
+  syncComposerImages();
+  syncSend();
+  return dockComposer;
 }
 
-const sendButton = () => document.querySelector("#dock .composer-send");
+const draftField = () => ["discover", "confirm"].includes(kind()) ? "comment" : "request";
+
+// The images that go with the answer: the attempt or candidates picked, each with its number, then the attachments.
+function syncComposerImages() {
+  if (!dockComposer) return;
+  const current = view();
+  const picks = ["discover", "generate"].includes(kind()) ? current.candidates.filter(candidate => draft.picked.has(candidate.number)) : [];
+  dockComposer.setImages([
+    ...picks.map(candidate => ({ key: `pick|${candidate.path}`, node: thumb(candidate.path, { picked: true, badge: pad(candidate.number), title: t("No. {number}", { number: pad(candidate.number) }), remove: () => togglePick(candidate.number) }) })),
+    ...current.attachments.map(path => ({ key: `attachment|${path}`, node: thumb(path, { remove: () => detach(path) }) }))
+  ]);
+}
+
+// Whether the answer can be sent, and the board's "Draw new", follow what is written and picked.
+function syncSend() {
+  if (!dockComposer || !view()) return;
+  const current = view();
+  if (kind() === "discover") dockComposer.send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !current.attachments.length;
+  else dockComposer.send.disabled = !draft[draftField()].trim();
+  const fresh = $("draw-new");
+  if (fresh) fresh.disabled = !draft.request.trim();
+}
 
 function attachButton() {
   return uploadButton(t("Attach images"), async files => {
@@ -668,9 +735,9 @@ async function detach(path) {
   catch { toast(t("Could not remove the image. Reload and try again."), "error"); }
 }
 
-// The talk of a make session writes the style; ideation in a generate session writes the image's brief.
+// The talk of a make session writes the style; an ideation session writes the image's brief.
 function discoverPanel(current, body, actions) {
-  const imageTalk = data.session.kind === "generate";
+  const imageTalk = data.session.kind === "ideation";
   const written = imageTalk ? current.brief : current.spec;
   const lead = current.candidates.length ? t("Pick the images you like; each can carry a note.") : written ? (imageTalk ? t("If the brief I wrote is off, just correct it.") : t("If the description I wrote is off, just correct it.")) : null;
   const next = imageTalk ? [t("Generate"), "generate"] : [t("Sample"), "sample"];
@@ -679,66 +746,46 @@ function discoverPanel(current, body, actions) {
     lead ? h("p", { class: "lead", text: lead }) : null
   );
   fill(actions, written ? button(next[0], { variant: "success", grow: true, onClick: () => submit(next[1]) }) : null);
-  fill($("dock"), answerBox("comment", imageTalk ? t("e.g. An app icon, but I don't know what to draw yet") : t("e.g. A little softer and simpler"), { sendTitle: t("Send"), onSend: () => submit(null), onInput: syncSend }));
-  syncSend();
-}
-
-// A discover answer can be words, picks, notes, or attachments; any one of them is enough to send.
-function syncSend() {
-  const send = kind() === "discover" ? sendButton() : null;
-  if (send) send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !view().attachments.length;
+  answerBox(imageTalk ? t("e.g. An app icon, but I don't know what to draw yet") : t("e.g. A little softer and simpler"), { sendTitle: t("Send"), onSend: () => submit(null) });
 }
 
 function samplePanel(current, body, actions) {
-  const box = answerBox("request", t("e.g. A mug by the window on a rainy day"), { sendTitle: t("Draw"), onSend: () => submit("request"), onInput: () => update() });
-  const update = () => { box.send.disabled = !draft.request.trim(); };
+  answerBox(t("e.g. A mug by the window on a rainy day"), { sendTitle: t("Draw"), onSend: () => submit("request") });
   fill(body,
     h("h2", { text: t("Try drawing in this style") }),
     h("p", { class: "lead", text: current.unit_cost != null ? t("{cost} an image", { cost: money(current.unit_cost) }) : t("What you write is drawn one image at a time.") })
   );
   fill(actions, button(t("Style"), { grow: true, onClick: () => submit("discover", draft.request) }), button(t("Confirm"), { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("confirm") }));
-  fill($("dock"), box);
-  update();
 }
 
 function confirmPanel(current, body, actions) {
-  const box = answerBox("comment", t("Anything more you want to see? e.g. One or two more subjects"), { attaching: false, sendTitle: t("Send"), onSend: () => submit(null), onInput: () => update() });
-  const update = () => { box.send.disabled = !draft.comment.trim(); };
+  answerBox(t("Anything more you want to see? e.g. One or two more subjects"), { attaching: false, sendTitle: t("Send"), onSend: () => submit(null) });
   fill(body,
     h("h2", { text: t("Pick the images to use as references") }),
     h("p", { class: "lead", id: "selection-count" })
   );
   fill(actions, button(t("Sample"), { onClick: () => submit("sample", draft.comment) }), button(t("Confirm"), { variant: "success", grow: true, onClick: () => submit("done") }));
-  fill($("dock"), box);
-  update();
   syncSelection();
 }
 
 function generatePanel(current, body, actions) {
   const started = current.candidates.length > 0;
-  const box = answerBox("request", started ? t("e.g. A bigger handle") : t("e.g. A coffee cup in front of a laptop"), { sendTitle: t("Generate"), onSend: () => submit(draft.picked.size ? "refine" : "new"), onInput: () => update() });
-  const fresh = button(t("Draw new"), { iconName: "plus", grow: true, hidden: !started, onClick: () => submit("new") });
-  const update = () => { box.send.disabled = fresh.disabled = !draft.request.trim(); };
   fill(body,
     h("h2", { text: started ? t("Pick one and write what to change") : t("What shall we make?") }),
     h("p", { class: "lead", id: "selection-count", text: started ? "" : t("Images you make are kept in the archive automatically.") })
   );
-  fill(actions, button(t("Ideation"), { grow: true, onClick: () => submit("discover", draft.request) }), fresh);
-  fill($("dock"), box);
-  update();
+  fill(actions, started ? Object.assign(button(t("Draw new"), { iconName: "plus", grow: true, onClick: () => submit("new") }), { id: "draw-new" }) : null);
+  answerBox(started ? t("e.g. A bigger handle") : t("e.g. A coffee cup in front of a laptop"), { sendTitle: t("Generate"), onSend: () => submit(draft.picked.size ? "refine" : "new") });
   syncSelection();
 }
 
 function modelPanel(current, body, actions) {
-  const box = answerBox("request", t("e.g. A monstera by the window"), { sendTitle: t("Draw"), onSend: () => submit("request"), onInput: () => update() });
-  const update = () => { box.send.disabled = !draft.request.trim(); };
+  answerBox(t("e.g. A monstera by the window"), { sendTitle: t("Draw"), onSend: () => submit("request") });
   fill(body,
     h("h2", { text: t("Try drawing with {model}", { model: shortModel(current.model) }) }),
     h("p", { class: "lead", text: t("Each image is drawn with the references attached. When it looks like this style, press Add.") })
   );
   fill(actions, button(t("Add"), { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("done") }));
-  fill($("dock"), box);
-  update();
 }
 
 // What the picks mean for the next step, kept in step with the cards.
@@ -782,10 +829,20 @@ async function submit(decision, reason = "") {
 function renderStage() {
   const current = view();
   const stage = $("stage-inner");
+  const place = data.session ? `${data.style}|${data.session.id}` : null;
+  if (appeared.place !== place) appeared = { place, keys: new Set(), primed: false };
   if (!data.session) return fill(stage, ...overviewStage());
   if (!current) return fill(stage, workingNote(t("Getting ready")));
   const stages = { discover: discoverStage, sample: boardStage, confirm: confirmStage, generate: boardStage, model: boardStage };
   fill(stage, ...stages[current.kind](current));
+  appeared.primed = true;
+}
+
+// " enter" for a thing the stage shows for the first time since the session opened, so it comes in with a motion.
+function entering(key) {
+  const fresh = !appeared.keys.has(key);
+  appeared.keys.add(key);
+  return fresh && appeared.primed ? " enter" : "";
 }
 
 function overviewStage() {
@@ -835,8 +892,8 @@ function lightboxItems(candidates) {
   }));
 }
 
-function messageNode(who, children) {
-  return h("div", { class: `message ${who}` }, [h("div", { class: "avatar", text: who === "user" ? t("Me") : "AS" }), h("div", { class: "message-body" }, children)]);
+function messageNode(who, children, key = null) {
+  return h("div", { class: `message ${who}${key ? entering(key) : ""}` }, [h("div", { class: "avatar", text: who === "user" ? t("Me") : "AS" }), h("div", { class: "message-body" }, children)]);
 }
 
 function thumbRow(candidates) {
@@ -872,17 +929,17 @@ function discoverStage(current) {
     const text = visit ? [t("Drawn in {kind}", { kind: KIND_NAMES[turn.kind] }), ...requests.map(request => `· ${request}`)].join("\n") : turn.message;
     const agentChildren = [text ? h("div", { class: `bubble${visit ? " stage-visit" : ""}`, text }) : null];
     if (!isCurrent && fresh.length) agentChildren.push(thumbRow(fresh));
-    if (agentChildren.some(Boolean)) nodes.push(messageNode("agent", agentChildren));
+    if (agentChildren.some(Boolean)) nodes.push(messageNode("agent", agentChildren, `agent|${turn.round}`));
     if (isCurrent && current.candidates.length) nodes.push(candidateGrid(current.candidates));
     const answered = turn.reply != null || turn.decision != null;
     const marks = answered ? answerMarks(turn.candidates) : null;
     if (turn.reply || turn.attachments.length || marks) {
       const attachments = turn.attachments.map(path => ({ path, info: [] }));
-      nodes.push(messageNode("user", [turn.reply ? h("div", { class: "bubble", text: turn.reply }) : null, marks, turn.attachments.length ? h("div", { class: "thumbs" }, turn.attachments.map((path, index) => thumb(path, { onClick: () => openLightbox(attachments, index) }))) : null]));
+      nodes.push(messageNode("user", [turn.reply ? h("div", { class: "bubble", text: turn.reply }) : null, marks, turn.attachments.length ? h("div", { class: "thumbs" }, turn.attachments.map((path, index) => thumb(path, { onClick: () => openLightbox(attachments, index) }))) : null], `user|${turn.round}`));
     }
   }
   const waiting = waitingText(current);
-  if (waiting) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), waiting])]));
+  if (waiting) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), waiting])], `waiting|${current.round}`));
   return [h("div", { class: "thread" }, nodes)];
 }
 
@@ -898,11 +955,12 @@ function candidateGrid(candidates, { flush = false } = {}) {
   return h("div", { class: `candidates${flush ? " flush" : ""}` }, candidates.map((candidate, index) => candidateCard(candidate, index, items)));
 }
 
+// Picks and notes show on the cards while the answer is being written; once sent, the answer's message shows them.
 function candidateCard(candidate, index, items) {
-  const isPicked = answering() ? draft.picked.has(candidate.number) : candidate.picked;
-  const note = answering() ? draft.notes[candidate.number] || "" : candidate.note || "";
+  const isPicked = answering() && draft.picked.has(candidate.number);
+  const note = answering() ? draft.notes[candidate.number] || "" : "";
   const memo = selectable() && kind() !== "confirm" ? tool("memo", note || t("Note"), () => editNote(candidate), { on: Boolean(note) }) : null;
-  return h("div", { class: `candidate${selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}`, "data-number": candidate.number }, [
+  return h("div", { class: `candidate${selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}${entering(candidate.path)}`, "data-number": candidate.number }, [
     imageFrame(candidate.path, {
       number: candidate.number, check: selectable(),
       onClick: () => selectable() ? togglePick(candidate.number) : openLightbox(items, index),
@@ -932,6 +990,7 @@ function togglePick(number) {
   else draft.picked.delete(number);
   document.querySelectorAll("[data-number]").forEach(node => node.classList.toggle("picked", draft.picked.has(Number(node.dataset.number))));
   syncSelection();
+  syncComposerImages();
   syncSend();
 }
 
@@ -946,16 +1005,26 @@ function confirmStage(current) {
   ];
 }
 
-// Boards list images in the order they were drawn, the one being drawn last.
+// A request on the board, with the attempt it was drawn from when the user picked one.
+function requestField(request, from, ordered) {
+  const base = from && ordered.find(candidate => candidate.path === from);
+  return h("div", { class: "entry-request" }, [
+    field(t("Request"), request || "-", { strong: true }),
+    base ? h("button", { class: "from", type: "button", title: t("Enlarge"), onclick: () => openLightbox(lightboxItems([base]), 0) }, [h("img", { src: fileUrl(base.path), alt: "" }), h("span", { text: t("From No. {number}", { number: pad(base.number) }) })]) : null
+  ]);
+}
+
+// Boards list images in the order they were drawn, the one being drawn last. Each card keeps its request on top,
+// what the agent has to say under it, scrolling when long, and opens the prompt on demand.
 function boardStage(current) {
   const ordered = current.candidates;
   const items = lightboxItems(ordered);
   const isGenerate = current.kind === "generate";
   const adds = data.overview.confirmed;
   const entries = ordered.map((candidate, index) => {
-    const isPicked = answering() ? draft.picked.has(candidate.number) : candidate.picked;
+    const isPicked = answering() && draft.picked.has(candidate.number);
     const facts = candidate.tool ? TOOL_NAMES[candidate.tool] : [candidate.model ? shortModel(candidate.model) : null, candidate.cost != null ? money(candidate.cost) : null].filter(Boolean).join(" · ");
-    return h("article", { class: `entry${isGenerate && selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}`, "data-number": candidate.number }, [
+    return h("article", { class: `entry${isGenerate && selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}${entering(candidate.path)}`, "data-number": candidate.number }, [
       imageFrame(candidate.path, {
         number: candidate.number, check: isGenerate && selectable(),
         onClick: () => isGenerate && selectable() ? togglePick(candidate.number) : openLightbox(items, index),
@@ -966,20 +1035,24 @@ function boardStage(current) {
         ]
       }),
       h("div", { class: "entry-info" }, [
-        field(t("Request"), candidate.request || "-", { strong: true }),
-        candidate.description ? field(t("Agent's note"), candidate.description) : null,
-        candidate.review ? field(t("Review"), candidate.review) : null,
-        candidate.prompt ? field(t("Prompt"), candidate.prompt, { mono: true, grows: true }) : null,
-        facts ? h("span", { class: "meta", text: facts }) : null
+        requestField(candidate.request, candidate.refined_from, ordered),
+        h("div", { class: "entry-notes" }, [
+          candidate.description ? field(t("Agent's note"), candidate.description) : null,
+          candidate.review ? field(t("Review"), candidate.review) : null
+        ]),
+        h("div", { class: "entry-foot" }, [
+          h("span", { class: "meta", text: facts }),
+          candidate.prompt ? button(t("Prompt"), { small: true, variant: "ghost", iconName: "text", onClick: () => ask({ title: t("Prompt"), description: candidate.request || "", text: candidate.prompt, confirm: t("Close") }) }) : null
+        ])
       ])
     ]);
   });
 
   const decision = current.feedback && current.feedback.decision;
   if (DRAWING.includes(decision)) {
-    entries.push(h("article", { class: "entry" }, [
+    entries.push(h("article", { class: `entry${entering(`pending|${current.round}`)}` }, [
       h("div", { class: "pending-frame" }, [h("span", { class: "spinner" }), t("Drawing")]),
-      h("div", { class: "entry-info" }, [field(t("Request"), current.feedback.request, { strong: true })])
+      h("div", { class: "entry-info" }, [requestField(current.feedback.request, current.feedback.picked[0], ordered)])
     ]));
   }
 

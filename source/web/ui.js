@@ -18,7 +18,9 @@ const ICONS = {
   chevron: '<path d="m6 9 6 6 6-6"/>',
   previous: '<path d="m15 18-6-6 6-6"/>',
   next: '<path d="m9 18 6-6-6-6"/>',
-  send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'
+  send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'
 };
 
 const $ = id => document.getElementById(id);
@@ -90,24 +92,60 @@ function rowList(rows) {
 
 // ---------- composer ----------
 
-// The message box under a conversation: attachments above the text, an attach button before it, send after it.
-// The text grows with what is written, and Cmd or Ctrl+Enter sends. node.send is the send button, for the page to enable.
-function composer({ value = "", placeholder = "", sendTitle, onInput = null, onSend, attach = null, attachments = [] }) {
+const COMPOSER_MAX = 240;
+
+// The message box under a conversation: images above the text, attach at the left of the bar under it, send at the right.
+// The box grows and shrinks smoothly with the text and the images, and Cmd or Ctrl+Enter sends.
+// node.send is the send button, for the page to enable; node.setImages([{ key, node }]) shows the images that go with
+// the message, bringing new ones in and taking removed ones out with a motion, and keeping the rest in place.
+function composer({ value = "", placeholder = "", sendTitle, onInput = null, onSend, attach = null }) {
   const input = h("textarea", { rows: 1, placeholder, value });
   const send = h("button", { class: "button primary icon-only composer-send", type: "button", title: sendTitle, "aria-label": sendTitle, html: icon("send"), onclick: onSend });
-  const fit = () => { input.style.height = "auto"; input.style.height = `${input.scrollHeight}px`; };
+  // The height a text box needs is measured on a hidden copy, so the box itself goes from one height to the next.
+  const fit = () => {
+    const copy = h("textarea", { rows: 1, value: input.value, style: `position: absolute; visibility: hidden; height: auto; transition: none; width: ${input.clientWidth}px` });
+    copy.className = input.className;
+    input.parentNode.append(copy);
+    const needed = copy.scrollHeight;
+    copy.remove();
+    input.style.height = `${Math.min(needed, COMPOSER_MAX)}px`;
+    input.style.overflowY = needed > COMPOSER_MAX ? "auto" : "hidden";
+  };
   input.addEventListener("input", () => { fit(); if (onInput) onInput(input.value); });
   input.addEventListener("keydown", event => {
     if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
     event.preventDefault();
     if (!send.disabled) send.click();
   });
-  const node = h("div", { class: "composer" }, [
-    attachments.length ? h("div", { class: "thumbs" }, attachments) : null,
-    h("div", { class: "composer-row" }, [attach, input, send])
-  ]);
+  const thumbs = h("div", { class: "thumbs" });
+  const images = h("div", { class: "composer-images" }, [thumbs]);
+  const node = h("div", { class: "composer" }, [images, input, h("div", { class: "composer-bar" }, [attach, h("span", { class: "grow" }), send])]);
   node.send = send;
-  requestAnimationFrame(fit);
+  node.setImages = items => {
+    const keys = new Set(items.map(item => item.key));
+    for (const child of [...thumbs.children]) {
+      if (keys.has(child.dataset.key) || child.classList.contains("leaving")) continue;
+      child.classList.add("leaving");
+      child.addEventListener("animationend", () => child.remove(), { once: true });
+    }
+    let before = null;
+    for (const item of [...items].reverse()) {
+      let child = [...thumbs.children].find(each => each.dataset.key === item.key && !each.classList.contains("leaving"));
+      if (!child) {
+        child = item.node;
+        child.dataset.key = item.key;
+        if (node.isConnected) child.classList.add("enter");
+      }
+      thumbs.insertBefore(child, before);
+      before = child;
+    }
+    images.classList.toggle("shown", items.length > 0);
+  };
+  requestAnimationFrame(() => {
+    input.style.transition = "none";
+    fit();
+    requestAnimationFrame(() => { input.style.transition = ""; });
+  });
   return node;
 }
 
@@ -151,9 +189,11 @@ function imageFrame(path, { fit = "natural", onClick = null, number = null, chec
   ]);
 }
 
-function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null } = {}) {
+// badge: a short label over the image's lower left corner, such as the number of a picked attempt.
+function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null, badge = null } = {}) {
   return h(remove ? "div" : "button", { class: ["thumb", picked && "picked", small && "small"].filter(Boolean).join(" "), type: remove ? null : "button", title, onclick: onClick }, [
     h("img", { src: fileUrl(path), alt: "", loading: "lazy" }),
+    badge ? h("span", { class: "badge", text: badge }) : null,
     remove ? h("button", { class: "remove", type: "button", title: t("Remove"), html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
   ]);
 }
@@ -209,9 +249,15 @@ let settleModal = null;
 
 // input: "text" (one line), "long" (a paragraph), or null for a plain confirmation.
 // choices: [{ value, title, detail?, aside? }] shows a list to pick one from. Resolves to the answer, or null when cancelled.
-function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "" }) {
+// text: a long text to read, such as a prompt, shown wide with only the confirm button.
+function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null }) {
+  if (text != null) input = null;
   $("modal-title").textContent = title;
   $("modal-description").textContent = description;
+  $("modal-document").hidden = text == null;
+  $("modal-document").textContent = text || "";
+  $("modal-form").classList.toggle("wide", text != null);
+  $("modal-cancel").hidden = text != null;
   $("modal-input").hidden = !input;
   $("modal-input").value = value;
   $("modal-input").placeholder = placeholder;

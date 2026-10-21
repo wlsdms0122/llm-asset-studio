@@ -182,7 +182,14 @@ const KO = {
   "Language": "언어",
   "Tool": "도구",
   "Background removal": "배경 제거",
-  "Cancel selection": "선택 취소"
+  "Cancel selection": "선택 취소",
+  "Theme": "테마",
+  "System": "시스템",
+  "Light": "라이트",
+  "Dark": "다크",
+  "Rename session": "세션 이름 변경",
+  "Name": "이름",
+  "From No. {number}": "{number}번에서"
 };
 
 // A viewer's choice is kept in this browser; without one, the browser's own language decides.

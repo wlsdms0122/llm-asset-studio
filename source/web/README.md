@@ -9,6 +9,8 @@ The web studio is built from one set of tokens and components so every screen be
 - In a session, what the user writes is sent from the composer docked under the stage, as in a chat app; its send button is the one primary action. The panel's buttons move between stages (`success`) or are secondary. Outside a session, a panel has one primary action at its bottom right.
 - Actions on an image are icons over the image, shown on hover (`tool`). Actions on a page are labeled buttons.
 - Labels are short nouns or verbs. A title line says what to do; help text appears only where something can go wrong.
+- Motion says that something arrived or left: a new message, image, or attachment comes in with `.enter`, the composer grows and shrinks smoothly, dialogs and menus pop in. Nothing moves on a redraw that changed nothing, and reduced motion turns it all off.
+- The viewer picks the theme (system, light, dark) in the app bar; the choice stays in that browser.
 - Every text on screen is written in English through `t()` (or `tn()` when it counts something), and `i18n.js` gives its Korean. The shell's fixed words carry `data-t` or `data-t-title`. The viewer picks the language in the app bar and the choice stays in that browser. `verify` fails on a text without its Korean.
 - An image is shown either at its own ratio (`imageFrame` natural: boards, candidates, the lightbox) or cropped to a square cell (`imageFrame` fill: grids of many images, cards). Grids always use square cells so rows line up.
 - Adding an image to a style's references is a one-way action available wherever the image is shown; whether an image is a reference is not a property of the image. References are removed only from the reference list.
@@ -23,7 +25,7 @@ The web studio is built from one set of tokens and components so every screen be
 | shape | `--radius-sm` 8px, `-md` 12, `-lg` 16; `--control` 40px and `--control-sm` 32px heights |
 | depth | `--shadow-sm`, `-md`, `-lg` |
 
-Dark mode redefines the color tokens only.
+Each color token is `light-dark(light, dark)`, so one definition serves both themes; picking a theme sets `data-theme` on the root, which fixes the color scheme.
 
 ## Components (`ui.js`)
 
@@ -31,7 +33,7 @@ Dark mode redefines the color tokens only.
 |---|---|
 | `button(label, { variant, small, grow, iconName })` | page and panel actions; variant `primary` (one per screen), `success` (moving a stage forward: 샘플, 확정, 추가), `danger` (deleting), `ghost`, or none |
 | `iconButton(icon, title, onClick)` | a panel action with a well-known icon (attach, new) |
-| `composer({ value, placeholder, sendTitle, onInput, onSend, attach, attachments })` | the message box docked under a conversation or a board: attachments above the text, attach before it, send after it; grows with the text, Cmd+Enter sends, `node.send` is the send button |
+| `composer({ value, placeholder, sendTitle, onInput, onSend, attach })` | the message box docked under a conversation or a board, kept for as long as its round: images on top, the text, and a bar with attach on the left and send on the right; grows smoothly with the text, Cmd+Enter sends, `node.send` is the send button, `node.setImages([{ key, node }])` shows what goes with the message (picked images, then attachments) |
 | `uploadButton(title, onFiles)` | picking image files |
 | `tool(icon, title, onClick, { href, download, on, quiet })` | actions over an image or a list row |
 | `pill(text, { tone, dot, small })` | status: `accent` for in progress or my turn, `success` for confirmed |
@@ -39,11 +41,11 @@ Dark mode redefines the color tokens only.
 | `dropdown({ value, options, onChange })` | choosing one of a few values in place, inside a line of other content |
 | `rowList(rows)`, `listRow({ title, detail, aside, onClick, current })` | a list of things to open, choose, or delete (a style's models, its sessions); the action on a row is a quiet `tool` shown on hover |
 | `openMenu(at, items)` | a context menu or a dropdown's list |
-| `ask({ title, input, choices, danger })` | every dialog: a name, a note, a confirmation, or picking one of a list |
+| `ask({ title, input, choices, danger, text })` | every dialog: a name, a note, a confirmation, picking one of a list, or reading a long text such as a prompt |
 | `toast(message, kind)` | the result of an action |
 | `field(label, value, { strong, mono, grows })` | a labeled piece of information (request, memo, prompt) |
 | `sectionTitle(title, aside)` | the heading of a block on the stage or in a panel |
 | `emptyState({ title, text, action })` | a list with nothing in it yet |
 | `workingNote(text)` | the agent is working |
 | `imageFrame(path, { fit, number, check, tools, onClick })` | every image larger than a thumbnail |
-| `thumb(path, { picked, small, remove })` | small images in a row (attachments, references in a session, picks in a reply) |
+| `thumb(path, { picked, small, remove, badge })` | small images in a row (attachments, references in a session, picks in a reply or in the composer, with their number as the badge) |
