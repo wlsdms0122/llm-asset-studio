@@ -54,8 +54,8 @@ function h(tag, properties = {}, children = []) {
 // ---------- actions ----------
 
 // variant: "" (secondary), primary, success, danger, ghost. A panel has one primary.
-function button(label, { variant = "", small = false, grow = false, onClick, title, disabled, hidden, iconName } = {}) {
-  const node = h("button", { class: ["button", variant, small && "small", grow && "grow"].filter(Boolean).join(" "), type: "button", title, disabled, hidden, onclick: onClick });
+function button(label, { variant = "", small = false, grow = false, onClick, title, disabled, hidden, iconName, class: extra = null } = {}) {
+  const node = h("button", { class: ["button", variant, small && "small", grow && "grow", extra].filter(Boolean).join(" "), type: "button", title, disabled, hidden, onclick: onClick });
   if (iconName) node.innerHTML = icon(iconName);
   node.append(h("span", { text: label }));
   return node;

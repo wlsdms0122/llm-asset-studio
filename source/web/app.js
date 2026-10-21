@@ -501,11 +501,7 @@ function renderPanelHead() {
   const inSession = session && session.kind !== "make";
 
   fill($("panel-head"),
-    h("nav", { class: "crumbs", "aria-label": t("Path") }, [
-      h("a", { href: "#/", text: t("Styles") }),
-      inSession ? h("span", { html: icon("next") }) : null,
-      inSession ? h("a", { href: styleHash(data.style), text: data.style }) : null
-    ]),
+    button(inSession ? data.style : t("Styles"), { small: true, iconName: "previous", title: t("Back"), class: "back", onClick: () => { location.hash = inSession ? styleHash(data.style) : "#/"; } }),
     inSession
       ? h("div", { class: "title-row" }, [h("h1", { text: session.title || sessionName(session) }), tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true })])
       : h("h1", { text: data.style }),

@@ -52,10 +52,10 @@
 .panel-resize:hover, body.resizing .panel-resize { background: linear-gradient(90deg, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
 body.resizing { cursor: col-resize; user-select: none; }
 .panel-head { padding: var(--space-5) var(--space-5) var(--space-4); border-bottom: 1px solid var(--line); }
-.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 0 0 0 -6px; font-size: var(--text-sm); font-weight: 600; }
-.crumbs a { padding: 2px 6px; border-radius: 6px; color: var(--fg-muted); text-decoration: none; transition: background .15s, color .15s; }
-.crumbs a:hover { color: var(--fg); background: var(--surface-sunken); }
-.crumbs svg.icon { width: 14px; height: 14px; color: var(--fg-faint); }
+/* Back to the page above: a small button naming where it goes. */
+.panel-head .back { gap: 2px; max-width: 100%; padding: 0 12px 0 6px; color: var(--fg-muted); }
+.panel-head .back:hover { color: var(--fg); }
+.panel-head .back span { overflow: hidden; text-overflow: ellipsis; }
 .panel-head h1 { margin: 6px 0 0; font-size: var(--text-xl); letter-spacing: -.02em; word-break: break-all; }
 .panel-head .title-row { display: flex; align-items: flex-start; gap: var(--space-1); }
 .panel-head .title-row h1 { flex: 1; min-width: 0; }
