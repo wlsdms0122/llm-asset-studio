@@ -289,6 +289,7 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
   $("modal-confirm").textContent = confirm;
   $("modal-confirm").className = `button ${danger ? "danger" : "primary"}`;
   $("modal").hidden = false;
+  fitModalInput();
   setTimeout(() => (input ? $("modal-input") : $("modal-confirm")).focus(), 0);
   return new Promise(resolve => { settleModal = resolve; });
 }
@@ -310,6 +311,15 @@ function modalResult() {
 $("modal-form").addEventListener("submit", event => { event.preventDefault(); closeModal(modalResult()); });
 $("modal-cancel").addEventListener("click", () => closeModal(null));
 $("modal").addEventListener("click", event => { if (event.target === $("modal")) closeModal(null); });
+// A one-line answer still shows all of a long name: the box grows with what is in it.
+function fitModalInput() {
+  const input = $("modal-input");
+  if (!input.classList.contains("single")) return void (input.style.height = "");
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight + 2}px`;
+}
+$("modal-input").addEventListener("input", fitModalInput);
+
 $("modal-input").addEventListener("keydown", event => {
   if (event.key === "Enter" && ($("modal-input").classList.contains("single") || event.metaKey || event.ctrlKey)) {
     event.preventDefault();

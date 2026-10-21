@@ -236,7 +236,7 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .modal-description { margin: -6px 0 0; color: var(--fg-muted); font-size: var(--text-md); }
 .modal-description:empty { display: none; }
 .modal-box textarea { height: 112px; }
-.modal-box textarea.single { height: 46px; }
+.modal-box textarea.single { height: 46px; max-height: 160px; }
 .field-error { margin: -4px 0 0; color: var(--danger); font-size: var(--text-sm); }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-1); }
 .modal-choices { display: flex; flex-direction: column; gap: 6px; max-height: 380px; overflow-y: auto; }

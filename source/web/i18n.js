@@ -188,7 +188,8 @@ const KO = {
   "Dark": "다크",
   "Rename session": "세션 이름 변경",
   "Name": "이름",
-  "From No. {number}": "{number}번에서"
+  "From No. {number}": "{number}번에서",
+  "Path": "경로"
 };
 
 // A viewer's choice is kept in this browser; without one, the browser's own language decides.

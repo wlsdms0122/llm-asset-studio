@@ -446,8 +446,12 @@ function renderStyle() {
     bindResize();
     // Load events do not bubble, so the stage listens in the capture phase.
     $("stage").addEventListener("load", event => { if (following && event.target.tagName === "IMG") $("stage").scrollTop = $("stage").scrollHeight; }, true);
-    // When the composer grows or shrinks, the stage's height changes with it; a stage following the newest content stays on it.
-    new ResizeObserver(() => { if (following) $("stage").scrollTop = $("stage").scrollHeight; }).observe($("stage"));
+    // The stage keeps room for the composer floating over it; while the composer grows or shrinks, a stage following
+    // the newest content stays on it.
+    new ResizeObserver(() => {
+      $("stage").style.setProperty("--dock", `${$("dock").offsetHeight}px`);
+      if (following) $("stage").scrollTop = $("stage").scrollHeight;
+    }).observe($("dock"));
   }
 
   renderPanelHead();
@@ -497,7 +501,11 @@ function renderPanelHead() {
   const inSession = session && session.kind !== "make";
 
   fill($("panel-head"),
-    h("a", { class: "back", href: inSession ? styleHash(data.style) : "#/", text: `← ${inSession ? data.style : t("Styles")}` }),
+    h("nav", { class: "crumbs", "aria-label": t("Path") }, [
+      h("a", { href: "#/", text: t("Styles") }),
+      inSession ? h("span", { html: icon("next") }) : null,
+      inSession ? h("a", { href: styleHash(data.style), text: data.style }) : null
+    ]),
     inSession
       ? h("div", { class: "title-row" }, [h("h1", { text: session.title || sessionName(session) }), tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true })])
       : h("h1", { text: data.style }),
