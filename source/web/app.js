@@ -650,16 +650,15 @@ async function useModel(model) {
   catch (error) { toast(error.message, "error"); }
 }
 
-// What one image costs: measured here when it has been used, else the listed price by its billing unit.
+// What one output image is listed at on OpenRouter, by its billing unit.
 function priceLabel(model) {
-  if (model.measured != null) return t("{cost} / image", { cost: money(model.measured) });
   const price = model.price;
   if (!price || price.cost == null) return t("No price listed");
   if (price.cost === 0) return t("Free");
   const from = price.varies ? t(" and up") : "";
   if (price.unit === "image") return t("{cost} / image", { cost: money(price.cost) }) + from;
   if (price.unit === "megapixel") return t("About {cost} / 1K image", { cost: money(price.cost * 1.05) }) + from;
-  return t("Token priced (${per} per million)", { per: (price.cost * 1e6).toFixed(0) });
+  return t("{cost} / 1M tokens", { cost: `$${+(price.cost * 1e6).toFixed(2)}` }) + from;
 }
 
 async function loadCatalog() {
@@ -677,10 +676,14 @@ async function addModel() {
   const choices = catalog.filter(model => model.references >= needed && !data.overview.models.includes(model.id) && !adding.includes(model.id))
     .sort((a, b) => (b.created || 0) - (a.created || 0))
     .map(model => ({
-      value: model.id, title: model.name, aside: priceLabel(model),
-      detail: [model.id, t("Up to {count} references", { count: model.references }), model.measured != null ? t("measured") : null, model.price && model.price.reference ? t("{cost} per reference", { cost: money(model.price.reference) }) : null].filter(Boolean).join(" · ")
+      value: model.id, title: model.name, detail: model.id,
+      specs: [
+        [t("Price"), priceLabel(model)],
+        [t("References"), t("Up to {count}", { count: model.references })],
+        model.price && model.price.reference ? [t("Per reference"), money(model.price.reference)] : null
+      ]
     }));
-  const model = await ask({ title: t("Add model"), description: t("Choosing one writes a prompt guide for it, refined over a few drawings. Prices are for one 1K image."), confirm: t("Start adding"), input: null, choices });
+  const model = await ask({ title: t("Add model"), description: t("Choosing one writes a prompt guide for it, refined over a few drawings."), confirm: t("Start adding"), input: null, choices });
   if (model) openSession("model", model);
 }
 

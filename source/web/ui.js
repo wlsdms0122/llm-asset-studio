@@ -264,7 +264,7 @@ function toast(message, kind = "") {
 let settleModal = null;
 
 // input: "text" (one line), "long" (a paragraph), or null for a plain confirmation.
-// choices: [{ value, title, detail?, aside? }] shows a list to pick one from. Resolves to the answer, or null when cancelled.
+// choices: [{ value, title, detail?, aside?, specs? }] shows a list to pick one from; specs are [label, value] pairs. Resolves to the answer, or null when cancelled.
 // text: a long text to read, such as a prompt, shown wide with only the confirm button.
 function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null }) {
   if (text != null) input = null;
@@ -281,7 +281,11 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
   $("modal-choices").hidden = !choices;
   fill($("modal-choices"), ...(choices || []).map((choice, index) => h("label", { class: "choice" }, [
     h("input", { type: "radio", name: "modal-choice", value: choice.value, checked: index === 0 }),
-    h("span", {}, [h("strong", { text: choice.title }), choice.detail ? h("small", { text: choice.detail }) : null]),
+    h("span", {}, [
+      h("strong", { text: choice.title }),
+      choice.detail ? h("small", { text: choice.detail }) : null,
+      choice.specs ? h("dl", { class: "specs" }, choice.specs.filter(Boolean).map(([label, value]) => h("div", {}, [h("dt", { text: label }), h("dd", { text: value })]))) : null
+    ]),
     choice.aside ? h("span", { class: "price", text: choice.aside }) : null
   ])));
   $("modal-error").textContent = error;

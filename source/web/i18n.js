@@ -112,11 +112,7 @@ const KO = {
   "Free": "무료",
   " and up": "부터",
   "About {cost} / 1K image": "1K 약 {cost} / 장",
-  "Token priced (${per} per million)": "토큰 과금 (${per}/100만)",
-  "Up to {count} references": "레퍼런스 {count}장까지",
-  "measured": "실측",
-  "{cost} per reference": "레퍼런스 장당 {cost}",
-  "Choosing one writes a prompt guide for it, refined over a few drawings. Prices are for one 1K image.": "고르면 이 모델에 맞는 프롬프트 가이드를 만들고, 몇 장 그려 보면서 다듬어요. 가격은 1K 한 장 기준이에요.",
+  "Choosing one writes a prompt guide for it, refined over a few drawings.": "고르면 이 모델에 맞는 프롬프트 가이드를 만들고, 몇 장 그려 보면서 다듬어요.",
   "Start adding": "추가 시작",
   "Attach images": "이미지 첨부",
   "Could not remove the image. Reload and try again.": "이미지를 빼지 못했어요. 새로고침 후 다시 해 주세요.",
@@ -189,7 +185,11 @@ const KO = {
   "Rename session": "세션 이름 변경",
   "Name": "이름",
   "From No. {number}": "{number}번에서",
-  "Back": "뒤로"
+  "Back": "뒤로",
+  "{cost} / 1M tokens": "100만 토큰당 {cost}",
+  "Price": "가격",
+  "Up to {count}": "최대 {count}장",
+  "Per reference": "레퍼런스 장당"
 };
 
 // A viewer's choice is kept in this browser; without one, the browser's own language decides.
