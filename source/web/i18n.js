@@ -139,7 +139,6 @@ const KO = {
   "Pick the images to use as references": "레퍼런스로 쓸 이미지를 골라 주세요",
   "e.g. A bigger handle": "예: 손잡이를 더 크게",
   "e.g. A coffee cup in front of a laptop": "예: 노트북 앞의 커피잔",
-  "Draw new": "새로 그리기",
   "Pick one and write what to change": "고르고, 어떻게 바꿀지 적어 주세요",
   "What shall we make?": "무엇을 만들까요?",
   "Images you make are kept in the archive automatically.": "만든 이미지는 보관함에 자동으로 모여요.",

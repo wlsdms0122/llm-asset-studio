@@ -20,6 +20,10 @@ const ICONS = {
   next: '<path d="m9 18 6-6-6-6"/>',
   send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
   pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+  languages: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
   text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'
 };
 
@@ -61,6 +65,18 @@ function iconButton(iconName, title, onClick, { variant = "", small = false, dis
   return h("button", { class: ["button", "icon-only", variant, small && "small"].filter(Boolean).join(" "), type: "button", title, "aria-label": title, disabled, hidden, onclick: onClick, html: icon(iconName) });
 }
 
+// An icon button that opens a menu of choices under itself, such as the theme or the language.
+// options: [{ value, label }]; value is the current one.
+function menuButton(iconName, title, { value, options, onChange }) {
+  const node = iconButton(iconName, title, event => {
+    event.stopPropagation();
+    const box = node.getBoundingClientRect();
+    openMenu({ x: box.left, y: box.bottom + 4 }, options.map(option => ({ label: option.label, checked: option.value === value, onClick: () => { if (option.value !== value) onChange(option.value); } })));
+  }, { variant: "ghost" });
+  node.setAttribute("aria-haspopup", "menu");
+  return node;
+}
+
 // A button that opens the file picker for images.
 function uploadButton(title, onFiles, { iconName = "clip", label = null, variant = "" } = {}) {
   const input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: true });
@@ -68,9 +84,9 @@ function uploadButton(title, onFiles, { iconName = "clip", label = null, variant
   return h("label", { class: ["button", variant, label ? "" : "icon-only"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) + (label ? `<span>${label}</span>` : "") }, [input]);
 }
 
-// An action over an image (zoom, download, add to references): an icon that shows on hover.
-function tool(iconName, title, onClick, { href = null, download = null, on = false, quiet = false } = {}) {
-  const properties = { class: ["tool", on && "on", quiet && "quiet"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) };
+// An action over an image (zoom, download, add to references): an icon that shows on hover. danger: turns red on hover.
+function tool(iconName, title, onClick, { href = null, download = null, on = false, quiet = false, danger = false } = {}) {
+  const properties = { class: ["tool", on && "on", quiet && "quiet", danger && "danger"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) };
   if (href) return h("a", { ...properties, href, download, onclick: event => event.stopPropagation() });
   return h("button", { ...properties, type: "button", onclick: event => { event.stopPropagation(); onClick(event); } });
 }

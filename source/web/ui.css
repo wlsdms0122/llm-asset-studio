@@ -75,6 +75,7 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 @keyframes pop { from { opacity: 0; transform: scale(.92); } }
+@keyframes away { to { opacity: 0; transform: scale(.8); } }
 /* What appears after the page has loaded (a new message, image, or attachment) comes in with .enter. */
 .enter { animation: rise .32s var(--ease) both; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; } }
@@ -103,7 +104,8 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .tool:hover { color: var(--accent); }
 .tool.on { background: var(--accent); color: #fff; }
 .tool.quiet { background: transparent; box-shadow: none; color: var(--fg-faint); }
-.tool.quiet:hover { color: var(--danger); background: var(--surface-sunken); }
+.tool.quiet:hover { color: var(--fg); background: var(--surface-sunken); }
+.tool.quiet.danger:hover { color: var(--danger); }
 .tool svg.icon { width: 16px; height: 16px; }
 
 /* ---------- pill, chip ---------- */
@@ -174,7 +176,8 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .thumb.small { width: 48px; height: 48px; }
 .thumb.picked { box-shadow: 0 0 0 2px var(--accent); }
 .thumb.enter { animation: pop .24s var(--ease) both; }
-.thumb.leaving { animation: pop .18s var(--ease) reverse both; }
+/* A thumb taken out of a row fades and gives its place back, so the rest close up. */
+.thumb.leaving { animation: away .18s var(--ease) both; pointer-events: none; transition: width .18s var(--ease), margin .18s var(--ease); width: 0; margin-right: calc(-1 * var(--space-2)); }
 .thumb .badge { position: absolute; left: 4px; bottom: 4px; padding: 0 6px; border-radius: 999px; background: var(--overlay); color: var(--overlay-ink); font-size: 11px; font-weight: 700; line-height: 18px; }
 .thumb .remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .65); color: #fff; cursor: pointer; opacity: 0; transition: opacity .15s; }
 .thumb:hover .remove, .thumb:focus-within .remove { opacity: 1; }
@@ -196,14 +199,15 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .row-text strong { font-size: var(--text-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-text small { color: var(--fg-faint); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-item .tool { opacity: 0; }
+.row-item .row { gap: 0; }
 .row-item:hover .tool, .row-item:focus-within .tool { opacity: 1; }
 
 /* ---------- text input ---------- */
 
 /* composer: the message box under a conversation. Images on top, the text under them, and a bar with attach
    on the left and send on the right; the box grows and shrinks smoothly with what is in it. */
-.composer { display: flex; flex-direction: column; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow-md); transition: border-color .15s, box-shadow .15s; }
-.composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft); }
+.composer { display: flex; flex-direction: column; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: 24px; background: var(--surface); transition: border-color .15s; }
+.composer:focus-within { border-color: var(--accent); }
 .composer-images { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .28s var(--ease); }
 .composer-images.shown { grid-template-rows: 1fr; }
 .composer-images > .thumbs { min-height: 0; overflow: hidden; padding: 0 var(--space-1); }

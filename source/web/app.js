@@ -157,14 +157,15 @@ function newStyle(base = null) {
   });
 }
 $("new-style").addEventListener("click", () => newStyle());
-fill($("language"), dropdown({ value: language, title: t("Language"), options: LANGUAGES.map(([value, label]) => ({ value, label })), onChange: setLanguage }));
+fill($("language"), menuButton("languages", t("Language"), { value: language, options: LANGUAGES.map(([value, label]) => ({ value, label })), onChange: setLanguage }));
 
 // The theme follows the system unless the viewer picks one; index.html applies a saved choice before the page draws.
-const THEMES = [["system", t("System")], ["light", t("Light")], ["dark", t("Dark")]];
+const THEMES = [["system", t("System"), "monitor"], ["light", t("Light"), "sun"], ["dark", t("Dark"), "moon"]];
 
 function renderTheme() {
   const current = document.documentElement.dataset.theme || "system";
-  fill($("theme"), dropdown({ value: current, title: t("Theme"), options: THEMES.map(([value, label]) => ({ value, label })), onChange: setTheme }));
+  const shown = THEMES.find(([value]) => value === current);
+  fill($("theme"), menuButton(shown[2], t("Theme"), { value: current, options: THEMES.map(([value, label]) => ({ value, label })), onChange: setTheme }));
 }
 
 function setTheme(theme) {
@@ -445,6 +446,8 @@ function renderStyle() {
     bindResize();
     // Load events do not bubble, so the stage listens in the capture phase.
     $("stage").addEventListener("load", event => { if (following && event.target.tagName === "IMG") $("stage").scrollTop = $("stage").scrollHeight; }, true);
+    // When the composer grows or shrinks, the stage's height changes with it; a stage following the newest content stays on it.
+    new ResizeObserver(() => { if (following) $("stage").scrollTop = $("stage").scrollHeight; }).observe($("stage"));
   }
 
   renderPanelHead();
@@ -583,7 +586,7 @@ function modelRow(model) {
   const listed = catalogModels && catalogModels.find(each => each.id === model);
   return listRow({
     title: shortModel(model), detail: listed ? priceLabel(listed) : model, current: inUse, hint: inUse ? null : t("Draw with this model"), onClick: () => useModel(model),
-    aside: inUse ? pill(t("In use"), { tone: "success" }) : tool("trash", t("Delete model"), () => removeModel(model), { quiet: true })
+    aside: inUse ? pill(t("In use"), { tone: "success" }) : tool("trash", t("Delete model"), () => removeModel(model), { quiet: true, danger: true })
   });
 }
 
@@ -602,7 +605,7 @@ function sessionRow(session) {
     aside: h("div", { class: "row" }, [
       session.waiting ? null : pill(t("Working"), { tone: "accent", dot: "live" }),
       tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true }),
-      tool("trash", t("Delete session"), () => deleteSession(session), { quiet: true })
+      tool("trash", t("Delete session"), () => deleteSession(session), { quiet: true, danger: true })
     ])
   });
 }
@@ -710,14 +713,12 @@ function syncComposerImages() {
   ]);
 }
 
-// Whether the answer can be sent, and the board's "Draw new", follow what is written and picked.
+// Whether the answer can be sent follows what is written and picked.
 function syncSend() {
   if (!dockComposer || !view()) return;
   const current = view();
   if (kind() === "discover") dockComposer.send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !current.attachments.length;
   else dockComposer.send.disabled = !draft[draftField()].trim();
-  const fresh = $("draw-new");
-  if (fresh) fresh.disabled = !draft.request.trim();
 }
 
 function attachButton() {
@@ -774,7 +775,7 @@ function generatePanel(current, body, actions) {
     h("h2", { text: started ? t("Pick one and write what to change") : t("What shall we make?") }),
     h("p", { class: "lead", id: "selection-count", text: started ? "" : t("Images you make are kept in the archive automatically.") })
   );
-  fill(actions, started ? Object.assign(button(t("Draw new"), { iconName: "plus", grow: true, onClick: () => submit("new") }), { id: "draw-new" }) : null);
+  fill(actions, );
   answerBox(started ? t("e.g. A bigger handle") : t("e.g. A coffee cup in front of a laptop"), { sendTitle: t("Generate"), onSend: () => submit(draft.picked.size ? "refine" : "new") });
   syncSelection();
 }

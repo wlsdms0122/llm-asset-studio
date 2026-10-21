@@ -6,6 +6,8 @@
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; }
 .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #8b5cf6); }
 .nav { display: flex; gap: var(--space-1); flex: 1; }
+.appbar-actions { display: flex; align-items: center; gap: 2px; }
+.appbar-actions #new-style { margin-left: var(--space-2); }
 .nav a { padding: 6px 12px; border-radius: var(--radius-sm); color: var(--fg-muted); font-weight: 500; text-decoration: none; }
 .nav a:hover, .nav a.on { color: var(--fg); background: var(--surface-sunken); }
 
