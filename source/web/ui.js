@@ -93,11 +93,16 @@ function tool(iconName, title, onClick, { href = null, download = null, on = fal
 
 // ---------- rows ----------
 
-// One thing in a list to open or choose (a model, a session). aside: a pill or a quiet tool at the end.
-function listRow({ title, detail = null, aside = null, onClick = null, current = false, hint = null }) {
+// [label, value] pairs shown as a line of labeled values, such as a model's price and the references it takes.
+function specList(specs) {
+  return h("dl", { class: "specs" }, specs.filter(Boolean).map(([label, value]) => h("div", {}, [h("dt", { text: label }), h("dd", { text: value })])));
+}
+
+// One thing in a list to open or choose (a model, a session). aside: a pill or a quiet tool at the end; specs: specList pairs.
+function listRow({ title, detail = null, aside = null, onClick = null, current = false, hint = null, specs = null }) {
   const act = () => { if (onClick && !current) onClick(); };
   return h("div", { class: `row-item${current ? " current" : ""}`, role: "button", tabindex: 0, title: hint, onclick: act, onkeydown: event => { if (event.key === "Enter") act(); } }, [
-    h("div", { class: "row-text" }, [h("strong", { text: title }), detail ? h("small", { text: detail }) : null]),
+    h("div", { class: "row-text" }, [h("strong", { text: title }), detail ? h("small", { text: detail }) : null, specs ? specList(specs) : null]),
     aside
   ]);
 }
@@ -284,7 +289,7 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
     h("span", {}, [
       h("strong", { text: choice.title }),
       choice.detail ? h("small", { text: choice.detail }) : null,
-      choice.specs ? h("dl", { class: "specs" }, choice.specs.filter(Boolean).map(([label, value]) => h("div", {}, [h("dt", { text: label }), h("dd", { text: value })]))) : null
+      choice.specs ? specList(choice.specs) : null
     ]),
     choice.aside ? h("span", { class: "price", text: choice.aside }) : null
   ])));

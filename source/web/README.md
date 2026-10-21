@@ -39,8 +39,9 @@ Each color token is `light-dark(light, dark)`, so one definition serves both the
 | `pill(text, { tone, dot, small })` | status: `accent` for in progress or my turn, `success` for confirmed |
 | `chip(text, { on })` | filters |
 | `dropdown({ value, options, onChange })` | choosing one of a few values in place, inside a line of other content |
-| `rowList(rows)`, `listRow({ title, detail, aside, onClick, current })` | a list of things to open, choose, or delete (a style's models, its sessions); the action on a row is a quiet `tool` shown on hover |
+| `rowList(rows)`, `listRow({ title, detail, specs, aside, onClick, current })` | a list of things to open, choose, or delete (a style's models, its sessions); the action on a row is a quiet `tool` shown on hover |
 | `openMenu(at, items)` | a context menu or a dropdown's list |
+| `specList([[label, value]])` | a line of labeled values, such as a model's price, billing, and references; also `specs` on a list row or a choice |
 | `ask({ title, input, choices, danger, text })` | every dialog: a name, a note, a confirmation, picking one of a list, or reading a long text such as a prompt |
 | `toast(message, kind)` | the result of an action |
 | `field(label, value, { strong, mono, grows })` | a labeled piece of information (request, memo, prompt) |

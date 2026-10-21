@@ -589,7 +589,7 @@ function modelRow(model) {
   const inUse = model === data.overview.model;
   const listed = catalogModels && catalogModels.find(each => each.id === model);
   return listRow({
-    title: shortModel(model), detail: listed ? priceLabel(listed) : model, current: inUse, hint: inUse ? null : t("Draw with this model"), onClick: () => useModel(model),
+    title: shortModel(model), detail: model, specs: listed ? modelSpecs(listed) : null, current: inUse, hint: inUse ? null : t("Draw with this model"), onClick: () => useModel(model),
     aside: inUse ? pill(t("In use"), { tone: "success" }) : tool("trash", t("Delete model"), () => removeModel(model), { quiet: true, danger: true })
   });
 }
@@ -661,6 +661,16 @@ function priceLabel(model) {
   return t("{cost} / 1M tokens", { cost: `$${+(price.cost * 1e6).toFixed(2)}` }) + from;
 }
 
+// What a model is, as OpenRouter lists it: the price of one image, how it is billed, and the references it takes.
+function modelSpecs(model) {
+  return [
+    [t("Price"), priceLabel(model)],
+    billingLabel(model) ? [t("Billing"), billingLabel(model)] : null,
+    [t("References"), t("Up to {count}", { count: model.references })],
+    model.price && model.price.reference ? [t("Per reference"), money(model.price.reference)] : null
+  ];
+}
+
 // Whether one image always costs the same: a flat price per image, or one that changes with the options, the size, or the tokens.
 function billingLabel(model) {
   const price = model.price;
@@ -685,13 +695,7 @@ async function addModel() {
   const choices = catalog.filter(model => model.references >= needed && !data.overview.models.includes(model.id) && !adding.includes(model.id))
     .sort((a, b) => (b.created || 0) - (a.created || 0))
     .map(model => ({
-      value: model.id, title: model.name, detail: model.id,
-      specs: [
-        [t("Price"), priceLabel(model)],
-        billingLabel(model) ? [t("Billing"), billingLabel(model)] : null,
-        [t("References"), t("Up to {count}", { count: model.references })],
-        model.price && model.price.reference ? [t("Per reference"), money(model.price.reference)] : null
-      ]
+      value: model.id, title: model.name, detail: model.id, specs: modelSpecs(model)
     }));
   const model = await ask({ title: t("Add model"), description: t("Choosing one writes a prompt guide for it, refined over a few drawings."), confirm: t("Start adding"), input: null, choices });
   if (model) openSession("model", model);

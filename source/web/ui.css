@@ -246,8 +246,10 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .choice > span { flex: 1; display: grid; min-width: 0; }
 .choice strong { font-size: var(--text-md); }
 .choice small { color: var(--fg-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.choice .specs { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; font-size: var(--text-xs); }
-.choice .specs div { display: flex; gap: 6px; }
-.choice .specs dt { color: var(--fg-faint); }
-.choice .specs dd { margin: 0; font-weight: 600; color: var(--fg); }
+/* specs: a line of labeled values (a model's price, billing, references) */
+.specs { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 0; font-size: var(--text-xs); line-height: 1.5; }
+.specs div { display: flex; gap: 6px; }
+.specs dt { color: var(--fg-faint); }
+.specs dd { margin: 0; font-weight: 600; color: var(--fg); }
+.row-text .specs { margin-top: 4px; }
 .choice .price { flex: none; align-self: center; font-size: var(--text-sm); font-weight: 700; color: var(--fg); }
