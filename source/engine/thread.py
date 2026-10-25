@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Threads: conversations with the user about a style or an image, in rounds.
+"""Threads: conversations with the user about the project, a style, or an image, in rounds.
 
 A round is one message from the agent and the user's answer to it. Every surface reads and writes through this
 file, so an answer given on the web page and one given in conversation leave the same records:
 
   projects/<project>/threads/<id>/      id is t1, t2, ...
-    thread.json         kind, the style, when it started, the name the user gave it
+    thread.json         kind, the style (none for a project thread), when it started, the name the user gave it
     brief.md            an ideation thread's brief: the image the agent and the user settled on
     NNN/round.json      written once by the agent: its message, the candidate images in display order, what each
                         shows, and the proposals and nodes the message points to
@@ -13,7 +13,9 @@ file, so an answer given on the web page and one given in conversation leave the
     NNN/attachments/    images the user attaches while the round is open
     NNN/calls.jsonl     the generation calls for the round's candidates
 
-Two kinds:
+Three kinds:
+  project   what the project is for. The agent asks and writes project.md, the brief every style and generation in
+            the project reads.
   style     making a style and improving it. The agent describes the style back in plain words, asks, shows
             candidates from the draft model, and writes style.md; once the style has references, changes go to
             the user as proposals (proposal.py) tried with probes.
@@ -21,7 +23,9 @@ Two kinds:
             designer, writes brief.md; the user's "generate" turns the brief into a generation node.
 
 Commands:
-  open <style> style|ideation [--message M]   open a thread; a message is the user's first words, answering its opening
+  open <project> project [--message M]        open a thread about the project's brief
+  open <style> style|ideation [--message M]   open a thread about a style or an image; a message is the user's first
+                                              words, answering its opening
   next <thread>                               print the directory for the thread's next round, creating it
   publish <round dir> [--note N] [--describe D ...] [--proposal ID ...] [--node ID ...] [files]
   show <thread>                               the thread as the surfaces see it
@@ -41,13 +45,15 @@ from node import Node, drawn
 from project import Project
 from workspace import RecordError, images_in, read_json, read_lines, read_text, timestamp, write_json, write_once
 
-KINDS = {"style", "ideation"}
-DECISIONS = {"style": {None}, "ideation": {None, "generate"}}
+KINDS = {"project", "style", "ideation"}
+DECISIONS = {"project": {None}, "style": {None}, "ideation": {None, "generate"}}
 
 # What the user reads first. The rounds keep it, since a round records what was shown.
 NEW_STYLE_QUESTION = "어떤 스타일을 만들까요? 스타일은 그림에 무엇이 나오는지가 아니라, 어떤 그림이든 같은 느낌으로 그리는 방식이에요. 납작한 벡터인지 손그림인지 3D인지, 선과 색, 빛과 질감 같은 것들이요. 어디에 쓸 그림인지, 떠오르는 느낌을 편하게 적어 주세요. 비슷한 느낌의 이미지가 있으면 함께 올려 주세요."
 STYLE_QUESTION = "{style} 에서 무엇을 바꿀까요? 고치고 싶은 점, 더하고 싶은 모델, 레퍼런스 이야기 모두 괜찮아요."
 GUIDE_QUESTION = "어떤 가이드를 만들까요? 가이드는 혼자 그리지 않고, 이어받는 스타일에 색이나 형태 같은 일부 규칙을 더해요. 브랜드 색, 디자인 시스템처럼 지킬 것을 적어 주세요. 견본 이미지가 있으면 함께 올려 주세요."
+NEW_PROJECT_QUESTION = "이 프로젝트는 무엇을 위한 건가요? 그림이 어디에 쓰이는지, 누가 보는지, 지켜야 할 브랜드 색이나 톤이 있는지 편하게 적어 주세요. 대화를 바탕으로 프로젝트 브리프를 정리해 둘게요. 모든 스타일과 생성이 이 브리프를 읽어요."
+PROJECT_QUESTION = "브리프에서 무엇을 바꿀까요? 목적, 쓰는 곳, 보는 사람, 브랜드 색과 톤, 프로젝트 차원의 결정 모두 괜찮아요."
 IDEATION_QUESTION = "어떤 이미지가 필요하세요? 어디에 쓸지, 누가 보는지, 떠오르는 것을 편하게 적어 주세요. 참고할 이미지가 있으면 함께 올려 주세요."
 
 
@@ -76,30 +82,33 @@ class Thread:
         return sorted(found, key=lambda thread: int(thread.id[1:]))
 
     @classmethod
-    def open(cls, style, kind, question):
+    def open(cls, project, kind, question, style=None):
         if kind not in KINDS:
             raise RecordError(f"a thread is one of {', '.join(sorted(KINDS))}")
+        if (style is None) != (kind == "project"):
+            raise RecordError("a project thread has no style; the others have one")
         if kind == "ideation":
             reason = style.blocked()
             if reason:
                 raise RecordError(reason)
-        directory = workspace.claim_number(style.project.path / "threads", "t")
-        write_json(directory / "thread.json", {"kind": kind, "style": style.name, "started": timestamp()})
-        thread = cls(style.project, directory)
+        directory = workspace.claim_number(project.path / "threads", "t")
+        write_json(directory / "thread.json", {"kind": kind, "style": style.name if style else None, "started": timestamp()})
+        thread = cls(project, directory)
         round_directory = thread.next_round()
         thread.publish(round_directory, question)
         return thread
 
     @property
     def style(self):
-        return self.project.style(self.record["style"])
+        return self.project.style(self.record["style"]) if self.record["style"] else None
 
     @property
     def brief_file(self):
-        return self.directory / "brief.md"
+        """The document the thread writes: the project's brief, or an ideation's brief of one image."""
+        return {"project": self.project.brief_file, "ideation": self.directory / "brief.md"}.get(self.kind)
 
     def brief(self):
-        return read_text(self.brief_file) if self.kind == "ideation" else None
+        return read_text(self.brief_file) if self.brief_file else None
 
     def rounds(self):
         return sorted(path for path in self.directory.iterdir() if path.is_dir() and path.name.isdigit())
@@ -132,7 +141,7 @@ class Thread:
         if self.record.get("name"):
             return self.record["name"]
         heading = next((line for line in (self.brief() or "").splitlines() if line.strip()), "").lstrip("# ").strip()
-        if heading:
+        if heading and self.kind == "ideation":
             return heading
         for directory in self.rounds():
             feedback = read_json(directory / "feedback.json")
@@ -173,12 +182,12 @@ class Thread:
             if identifier not in known:
                 raise RecordError(f"{self.project.name} has no node {identifier}")
         record = {"note": note, "candidates": candidates, "descriptions": dict(zip(candidates, descriptions)), "proposals": list(proposals), "nodes": list(nodes), "time": timestamp()}
-        # What the user saw is copied in, since style.md and brief.md change while they are written.
-        record["spec"] = style.spec()
-        if self.kind == "ideation":
+        # What the user saw is copied in, since style.md and the briefs change while they are written.
+        if style:
+            record["spec"] = style.spec()
+        if self.brief_file:
             record["brief"] = self.brief()
         write_once(directory / "round.json", record)
-        workspace.heartbeat()
         return Round(self, directory)
 
     def rename(self, name):
@@ -291,18 +300,26 @@ class Round:
         return self.directory / "attachments"
 
 
+def open_project_thread(project, message="", attachments=(), surface="chat"):
+    """A conversation about the project's brief: writing it when there is none, changing it otherwise."""
+    thread = Thread.open(project, "project", PROJECT_QUESTION if project.brief().strip() else NEW_PROJECT_QUESTION)
+    if message.strip() or attachments:
+        answer_first(thread, message, attachments, surface)
+    return thread
+
+
 def open_style_thread(style, first=False, message="", attachments=(), surface="chat"):
     """A conversation about a style: making it when it is new, improving it otherwise. A message is the user's
     first words, and answers the opening round at once so the agent sees it."""
     question = (GUIDE_QUESTION if style.guide() else NEW_STYLE_QUESTION) if first else STYLE_QUESTION.format(style=style.name)
-    thread = Thread.open(style, "style", question)
+    thread = Thread.open(style.project, "style", question, style)
     if message.strip() or attachments:
         answer_first(thread, message, attachments, surface)
     return thread
 
 
 def open_ideation(style, message="", attachments=(), surface="chat"):
-    thread = Thread.open(style, "ideation", IDEATION_QUESTION)
+    thread = Thread.open(style.project, "ideation", IDEATION_QUESTION, style)
     if message.strip() or attachments:
         answer_first(thread, message, attachments, surface)
     return thread
@@ -321,14 +338,19 @@ def main():
     try:
         if arguments.command == "open":
             from style import Style
-            style = Style.at(arguments.style)
-            thread = open_style_thread(style, message=arguments.message) if arguments.kind == "style" else open_ideation(style, arguments.message)
+            if arguments.kind == "project":
+                thread = open_project_thread(Project.at(arguments.target), arguments.message)
+            else:
+                style = Style.at(arguments.target)
+                thread = open_style_thread(style, message=arguments.message) if arguments.kind == "style" else open_ideation(style, arguments.message)
             print(workspace.relative(thread.directory))
             return
         if arguments.command == "publish":
             directory = workspace.resolve(arguments.directory)
             thread = Thread.at(workspace.relative(directory.parent))
             thread.publish(directory, arguments.note, arguments.files or None, arguments.describe, arguments.proposal, arguments.node)
+            # The agent's publish, unlike the opening question a surface writes, says an agent is at work.
+            workspace.heartbeat()
             return
         thread = Thread.at(arguments.thread)
         if arguments.command == "next":
@@ -359,7 +381,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     opening = commands.add_parser("open")
-    opening.add_argument("style", help="projects/<project>/styles/<style>")
+    opening.add_argument("target", help="projects/<project> for a project thread, projects/<project>/styles/<style> otherwise")
     opening.add_argument("kind", choices=sorted(KINDS))
     opening.add_argument("--message", default="", help="the user's first words")
     for command in ("next", "show", "delete"):

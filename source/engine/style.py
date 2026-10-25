@@ -31,7 +31,7 @@ Commands, for the agent and for changes the user asks for in conversation (a sty
   materialize <style> <dir> [--revision N | --proposal ID]
                                                     write the effective style, its prompting files, and its references
   annotate <reference> --role R --shows S --take T --ignore I
-                                                    write a reference's annotation (style or subject reference)
+                                                    write a style reference's annotation
   set-check <style> [--shared TEXT ...]             record what the style references share besides the style
   restore <style> <revision>                        make an earlier revision current again, as a new revision
   extends <style> [<base> ...]                      set the styles this one builds on
@@ -298,14 +298,6 @@ class Style:
 
     # Changes the user makes
 
-    def edit(self, path, text):
-        """The user's own edit of a text file of the style."""
-        target = (self.path / path).resolve()
-        if path not in ("style.md", "probes.md") and not (target.parent == (self.path / "prompting").resolve() and target.suffix == ".md" and target.is_file()):
-            raise RecordError(f"{path} is not a text file of the style")
-        (self.path / path).write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
-        return self.revision(f"edited {path}", "owner")
-
     def use(self, model):
         if model not in self.models():
             raise RecordError(f"{self.name} has no prompting file for {model}; add the model first")
@@ -533,7 +525,7 @@ def retitle(folder, old, new):
                 document.write_text("\n".join(lines), encoding="utf-8")
 
 
-# Reference images: a style's references/ and a project's subjects/ are kept the same way.
+# Reference images
 
 def annotation(path):
     return read_json(Path(path).with_suffix(".json"))
@@ -541,7 +533,7 @@ def annotation(path):
 
 def annotate(path, role, shows, take, ignore):
     path = workspace.resolve(path)
-    if not path.is_file() or path.suffix.lower() not in workspace.IMAGE_SUFFIXES or path.parent.name not in ("references", "subjects"):
+    if not path.is_file() or path.suffix.lower() not in workspace.IMAGE_SUFFIXES or path.parent.name != "references":
         raise RecordError(f"{workspace.relative(path)} is not a reference")
     if role not in ROLES:
         raise RecordError(f"a reference's role is one of {', '.join(sorted(ROLES))}")
@@ -599,9 +591,7 @@ def main():
             return
         if arguments.command == "annotate":
             path = annotate(arguments.reference, arguments.role, arguments.shows, arguments.take, arguments.ignore)
-            # A style reference's annotation is part of the style; a subject's belongs to the project.
-            if path.parent.name == "references":
-                Style.at(arguments.reference).revision(f"annotated {path.name}", "agent")
+            Style.at(arguments.reference).revision(f"annotated {path.name}", "agent")
             print(workspace.relative(path))
             return
         style = Style.at(arguments.style)

@@ -10,7 +10,9 @@ The web page and the conversation are two surfaces over the same records. Whatev
 
 ## Projects
 
-A project is one purpose: an app, a blog, a product line (`project.py new <name>`). Its `project.md` says what the images are for, where they are seen and at what size, who sees them, the brand's colors and tone, and the decisions that hold for every image in it. The agent reads it before writing any prompt for the project and keeps it current: a decision the user makes for the whole project (the colors of an app) goes into `project.md`, or into a guide (see Extends and guides), never only into one prompt.
+A project is one purpose: an app, a blog, a product line (`project.py new <name>`). Its `project.md`, the brief, says what the images are for, where they are seen and at what size, who sees them, the brand's colors and tone, and the decisions that hold for every image in it. The agent reads it before writing any prompt for the project.
+
+The agent writes the brief, the way it writes a style's words; the user tells. A project thread is that conversation ("Write in conversation" or "Change in conversation" beside the brief, or `thread.py open projects/<p> project`): the agent asks what the project is for, writes `project.md` in English, and publishes a round that says what it wrote and what is still open. It keeps the brief current: a decision the user makes for the whole project (the colors of an app), wherever it was said, goes into `project.md` or into a guide (see Extends and guides), never only into one prompt.
 
 A style lives in one project. To use a style in another project, copy it (`style.py new <project> <name> --from <style>`); the copy starts as its own first revision and says where it came from. Styles that should improve together live in one project and extend the same base.
 
@@ -92,7 +94,7 @@ A reference is an image, its role, and what a generation takes from it. The role
 | role | takes | ignores | lives in |
 |---|---|---|---|
 | style reference | how it is drawn: medium, light, texture, line, detail | its subject, its color layout, its composition | the style's `references/`, curated by the user |
-| subject reference | the shape of one subject: a mascot, a logo's form, a product silhouette | how it is drawn | the project's `subjects/`, or attached to a request |
+| subject reference | the shape of one subject: a mascot, a logo's form, a product silhouette | how it is drawn | an image the request builds on or attaches |
 | composition reference | layout, pose, viewpoint, crop | its subject and how it is drawn | attached to a request |
 | guide reference | only what its guide covers (a palette swatch gives colors) | everything else | a guide's `references/` |
 
@@ -126,7 +128,7 @@ A style has one prompting file per model it can draw with, and `style.json` name
 
 ## Generating
 
-The canvas is where images are made. A generation node is one request with a style: the user writes it in the composer with nothing selected (a new image), or with images selected (they become the node's parents; one selected image is a refine of it). In conversation the agent adds the node for the user (`node.py add <project> --style S --request "<the user's words>" [--parent <image>]`).
+The canvas is where images are made. A generation node is one request with a style: the user writes it in the composer with no image picked (a new image), or with images picked on the canvas (they become the node's parents; one picked image is a refine of it). In conversation the agent adds the node for the user (`node.py add <project> --style S --request "<the user's words>" [--parent <image>]`).
 
 For each generation node `watch` hands over, the agent:
 
@@ -146,10 +148,10 @@ For a user who does not know yet what the image should be, an ideation thread wo
 
 ## Surfaces
 
-- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: the nodes with their images and the agent's notes, edges from each parent image to the node built on it, frames, and the composer; beside it the brief, the styles, the threads, and the subjects. A style's page has its rules, the proposals with their diffs and probe comparisons, the probe runs, the references with their annotations and set check, the models, the revisions, and what it extends. A thread's page is the conversation. Reviews are not shown on a node until the user has built on one of its images or opened them, so they do not steer the pick. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
+- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: a card per node with its request and images, an edge from each parent's card to the node built on it, groups (frames) that move their nodes together, and the composer; beside it the brief, the styles, and the threads. Selecting a node opens its inspector: the full request, the agent's notes, the reviews folded until the user opens them (so they do not steer the pick), what it was made with, and the references used and left out. A style's page has its rules, the proposals with their diffs and probe comparisons, the probe runs, the references with their annotations and set check, the models, the revisions, and what it extends. A thread's page is the conversation. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
 - Conversation: the agent sends a numbered sheet (`sheet.py <thread | node | run>`), records the user's reply with `thread.py answer`, adds nodes with `node.py add`, and asks for runs with `probe.py request`.
 
-The server writes only records: projects and briefs, styles and the user's own changes to them, proposals accepted or rejected, probe runs asked for, nodes asked for (a tool node it runs itself), the canvas layout, threads and answers. Generation always goes through the agent.
+The server writes only records: projects, styles and the user's own changes to them (references, models, extends, restoring a revision), proposals accepted or rejected, probe runs asked for, nodes asked for (a tool node it runs itself), the canvas layout, threads and answers. What is written in words (the brief, a style's rules, its probes and prompting) the agent writes, from a thread. Generation always goes through the agent.
 
 ## Working on the web
 
@@ -167,7 +169,6 @@ The agent waits with `open-package watch`, run in the background. It returns as 
 - `projects/<p>/nodes/<id>`: a generation waits. Draw it and publish the node.
 - `projects/<p>/styles/<s>/runs/<n>`: a probe run waits. Draw one image per request and publish the run.
 - `projects/<p>/styles/<s>`: a reference has no annotation, or the reference set changed since its check. Annotate, check the set, and say what the check found in the style's thread if it found something.
-- `projects/<p>/subjects`: a subject reference has no annotation.
 
 Then it runs `watch` again, for as long as the studio is open. `watch` reads the records rather than changes, so work that came in while the agent was busy is printed by the next run, and work already waiting is printed at once. Every look is recorded in `agent.json`, which is how the page knows an agent is attached. Something the user deleted or renamed needs nothing from the agent.
 

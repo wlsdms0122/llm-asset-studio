@@ -4,7 +4,7 @@
 Checks that every text on screen has its Korean, then makes a project and a style through its whole life (the style
 thread, probes drawn from the words alone, references picked from them and annotated, generation nodes and a refine,
 a proposal tried with probes and accepted, a stale proposal refused, a revision restored), extends a guide, runs a
-tool node, turns an ideation brief into a node, renames, copies, and deletes, asks the server for every page's state
+tool node, turns an ideation brief into a node, writes a project's brief in its thread, renames, copies, and deletes, asks the server for every page's state
 and writes through it, and stores a key. Image generation is stood in for by writing images and their call records
 where generate.py would. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
@@ -214,8 +214,13 @@ def lifecycle(workspace):
     copied = out(workspace, "style.py", "new", "other", "glyph", "--from", renamed).splitlines()[0]
     first = json.loads((workspace / copied / "revisions.jsonl").read_text().splitlines()[0])
     check("a copied style says where it came from", first["summary"].startswith("copied from demo/glyph") and json.loads((workspace / copied / "style.json").read_text())["extends"] == [])
-    engine(workspace, "project.py", "subject-add", "demo", drawn[0])
-    check("watch hands over a subject without its annotation", "projects/demo/subjects" in out(workspace, "watch.py", "--once").split())
+
+    brief = out(workspace, "thread.py", "open", "projects/demo", "project", "--message", "icons for a demo app")
+    check("a project thread starts with the user's words", brief in out(workspace, "watch.py", "--once").split())
+    (workspace / "projects/demo/project.md").write_text("# demo\n\nIcons for a demo app.\n")
+    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", brief), "--note", "brief written")
+    shown = json.loads(out(workspace, "thread.py", "show", brief))
+    check("a project thread shows the brief the agent wrote", shown["style"] is None and shown["rounds"][-1]["brief"].startswith("# demo") and shown["rounds"][-1]["spec"] is None)
     return node
 
 
@@ -262,8 +267,8 @@ def server(workspace, node):
         check("lists projects with whether an agent is attached", [project["name"] for project in listed["projects"]] == ["demo", "other"] and listed["agent"]["seen"] is not None)
         project = state("/api/project?project=demo")
         check("a project's canvas state", {style["name"] for style in project["styles"]} == {"glyph", "palette", "branded"} and any(item["id"] == "n1" for item in project["nodes"]))
-        built_on = next(item for item in project["nodes"] if item["id"] == "n1")
-        check("a node built on shows its reviews", built_on["images"][0]["review"] == "pass: holds")
+        reviewed = next(item for item in project["nodes"] if item["id"] == "n1")
+        check("a node carries its reviews", reviewed["images"][0]["review"] == "pass: holds")
         style = state("/api/style?project=demo&style=glyph")
         check("a style's page state", state("/api/style?project=demo&style=branded")["extends"] == ["glyph", "palette"] and style["leaks"] == {"reviewed": 2, "leaked": 1} and style["proposals"][0]["files"][0]["diff"])
         reference = next(item["object"] for item in state("/api/style?project=demo&style=branded")["drawn_with"])
@@ -280,11 +285,12 @@ def server(workspace, node):
         status, uploaded = post("/api/nodes", {"project": "demo", "kind": "upload", "attachments": [{"name": "a.png", "data": image}]})
         check("an upload is a node with its image", status == 200 and state("/api/project?project=demo")["nodes"][-1]["status"] == "done")
         check("saves the canvas", post("/api/canvas", {"project": "demo", "positions": {"n1": [10, 20], "zz": [0, 0]}})[1]["positions"] == {"n1": [10.0, 20.0]})
+        frames = post("/api/canvas", {"project": "demo", "frames": [{"title": " icons ", "nodes": ["n1", "n2", "zz"]}, {"title": "again", "nodes": ["n1"]}]})[1]["frames"]
+        check("a node is in one frame at most and an empty frame is gone", frames == [{"title": "icons", "nodes": ["n1", "n2"]}])
         status, opened = post("/api/threads", {"project": "demo", "style": "glyph", "message": "softer shadows"})
         check("a style thread opened with the user's words is the agent's turn", status == 200 and not state(f"/api/thread?project=demo&thread={opened['thread']}")["waiting"])
-        (workspace / "victim.md").write_text("keep")
-        check("an edit cannot reach outside the style", post("/api/styles/edit", {"project": "demo", "style": "glyph", "file": "prompting/../../../../../victim.md", "text": "x"})[0] == 400 and (workspace / "victim.md").read_text() == "keep")
-        check("edits style.md as a revision", post("/api/styles/edit", {"project": "demo", "style": "glyph", "file": "style.md", "text": "# glyph\n\nedited\n"})[0] == 200 and state("/api/style?project=demo&style=glyph")["revisions"][-1]["source"] == "owner")
+        status, opened = post("/api/threads", {"project": "demo", "kind": "project"})
+        check("opens a project thread for the brief", status == 200 and state(f"/api/thread?project=demo&thread={opened['thread']}")["kind"] == "project")
         check("asks for a probe run", post("/api/runs", {"project": "demo", "style": "glyph"})[0] == 200)
         status, created = post("/api/styles", {"project": "demo", "name": "새-스타일"})
         check("creates a style named in Korean with its thread", status == 200 and created["thread"])

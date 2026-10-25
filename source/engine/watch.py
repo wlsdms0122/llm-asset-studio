@@ -6,7 +6,6 @@ The agent's work, read from the records:
   projects/<p>/nodes/<id>               a generation node with no result yet
   projects/<p>/styles/<s>/runs/<n>      a probe run with no result yet
   projects/<p>/styles/<s>               a style reference with no annotation, or a reference set changed since its check
-  projects/<p>/subjects                 a subject reference with no annotation
 
 It looks at the records rather than at changes, so work that comes in while the agent is busy is printed by the
 next run, and work already waiting is printed at once. Every look is recorded in agent.json, so the page can show
@@ -22,7 +21,7 @@ import time
 import workspace
 from probe import ProbeRun
 from project import Project
-from workspace import digest, images_in
+from workspace import digest
 
 
 def pending():
@@ -38,8 +37,6 @@ def pending():
             found.extend(run.directory for run in ProbeRun.all(style) if run.result() is None)
             if unchecked(style):
                 found.append(style.path)
-        if any(not path.with_suffix(".json").exists() for path in images_in(project.subject_folder)):
-            found.append(project.subject_folder)
     return [workspace.relative(path) for path in found]
 
 

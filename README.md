@@ -23,7 +23,7 @@ Python 3.11 or later. `sheet` needs Pillow. The background removal tool needs ma
 ```
 open-package studio                       # the web studio on http://127.0.0.1:8770
 open-package watch                        # wait until the agent has work, and print where
-open-package project <command> ...        # new, rename, delete, subject-add, subject-remove
+open-package project <command> ...        # new, rename, delete
 open-package style <command> ...          # new, revise, effective, materialize, annotate, set-check, restore, extends, rename, delete, reference-add, reference-remove, use, model-remove
 open-package proposal <command> ...       # propose, accept, reject, show
 open-package probe <command> ...          # request, publish, show
@@ -42,7 +42,7 @@ Everything it makes and needs lives outside this directory, in `~/.config/asset-
 
 ```
 projects/<project>/
-  project.md                 what the images are for, where they are seen, the brand, the decisions for every image
+  project.md                 the brief: what the images are for, where they are seen, the brand, the decisions for every image
   styles/<style>/
     style.md                 the style in words, independent of any model
     style.json               the model in use, the styles it extends, whether it is a guide
@@ -52,10 +52,9 @@ projects/<project>/
     revisions.jsonl          every revision: the hash of every file above
     proposals/<id>/          changes the agent proposed, waiting for you or decided
     runs/<n>/                probe runs: the probes drawn with one revision or proposal
-  subjects/                  subject references the project reuses (a mascot, a logo's shape)
   nodes/<id>/                one request and its result: node.json, result.json, the images, calls.jsonl
-  threads/<id>/              conversations about a style or an image, in rounds
-  canvas.json                where the nodes sit on the canvas
+  threads/<id>/              conversations about the project's brief, a style, or an image, in rounds
+  canvas.json                where the nodes sit on the canvas and the groups they are in
 objects/                     every version of every style file and reference, by hash
 cache/                       what OpenRouter says about models, kept for a day
 agent.json                   when an agent last looked for work
@@ -75,7 +74,7 @@ document/              what the agent knows and follows
 source/
   engine/              Python, run as scripts
     workspace.py       where the workspace is, the objects store, the record conventions, and the key
-    project.py         a project: its brief, subjects, and canvas
+    project.py         a project: its brief and canvas
     style.py           a style: its files, revisions, effective style (extends), references and annotations
     proposal.py        a change to a style waiting for you
     probe.py           probe runs

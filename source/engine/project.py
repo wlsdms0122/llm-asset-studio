@@ -3,13 +3,12 @@
 
   projects/<project>/
     project.md              the brief: what the images are for, where they are seen, who sees them, brand colors and
-                            tone, and the decisions that hold for every style in the project
+                            tone, and the decisions that hold for every style in the project. The agent writes it
+                            from the project's thread (see thread.py).
     styles/<style>/         the project's styles (see style.py)
-    subjects/               subject references the project reuses (a mascot, a logo's shape), each with its annotation
     nodes/<id>/             what was made: one request and its result each (see node.py)
-    threads/<id>/           conversations about a style or an image (see thread.py)
-    canvas.json             where the user placed the nodes, the frames around them, and the nodes whose reviews
-                            the user has opened; page state, rewritten freely
+    threads/<id>/           conversations about the project, a style, or an image (see thread.py)
+    canvas.json             where the user placed the nodes and the frames that group them; page state, rewritten freely
 
 Paths inside a project's records are relative to the project ("nodes/n3/a.png", "styles/app-icon/references/01.png"),
 so renaming the project moves its folder and nothing else.
@@ -18,8 +17,6 @@ Commands:
   new <project>                         create a project
   rename <project> <name>               rename a project
   delete <project>                      delete a project and everything in it
-  subject-add <project> <image>         add a subject reference
-  subject-remove <project> <file>       take a subject reference out, by its file name in subjects/
 """
 
 import argparse
@@ -28,20 +25,7 @@ import sys
 from pathlib import Path
 
 import workspace
-from workspace import RecordError, images_in, read_json, read_text, write_json
-
-BRIEF = """# {name}
-
-What the images are for, where they are seen, and who sees them.
-
-## Brand
-
-Colors and tone every style in this project keeps.
-
-## Decisions
-
-Decisions that hold for every image in this project.
-"""
+from workspace import RecordError, read_json, read_text, write_json
 
 
 class Project:
@@ -77,7 +61,6 @@ class Project:
         if project.exists():
             raise RecordError(f"project {project.name} already exists")
         project.path.mkdir(parents=True)
-        (project.path / "project.md").write_text(BRIEF.format(name=project.name), encoding="utf-8")
         return project
 
     def exists(self):
@@ -100,9 +83,6 @@ class Project:
 
     def brief(self):
         return read_text(self.brief_file) or ""
-
-    def write_brief(self, text):
-        self.brief_file.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
 
     def purpose(self):
         """The first line of project.md under its title, which says what the project is for."""
@@ -127,22 +107,6 @@ class Project:
         from thread import Thread
         return Thread.all(self)
 
-    @property
-    def subject_folder(self):
-        return self.path / "subjects"
-
-    def subjects(self):
-        from style import annotation
-        return [{"path": self.relative(path), "annotation": annotation(path)} for path in images_in(self.subject_folder)]
-
-    def add_subject(self, source):
-        from style import add_image
-        return self.relative(add_image(self.subject_folder, source))
-
-    def remove_subject(self, name):
-        from style import remove_image
-        remove_image(self.subject_folder, name)
-
     # Canvas
 
     @property
@@ -151,17 +115,22 @@ class Project:
 
     def canvas(self):
         canvas = read_json(self.canvas_file, {})
-        return {"positions": canvas.get("positions", {}), "frames": canvas.get("frames", []), "revealed": canvas.get("revealed", [])}
+        return {"positions": canvas.get("positions", {}), "frames": canvas.get("frames", [])}
 
-    def save_canvas(self, positions=None, frames=None, revealed=None):
+    def save_canvas(self, positions=None, frames=None):
         canvas = self.canvas()
         known = {node.id for node in self.nodes()}
         if positions is not None:
             canvas["positions"] = {key: [float(value[0]), float(value[1])] for key, value in positions.items() if key in known}
         if frames is not None:
-            canvas["frames"] = [{"title": str(frame.get("title", "")), "nodes": [key for key in frame.get("nodes", []) if key in known]} for frame in frames]
-        if revealed is not None:
-            canvas["revealed"] = sorted({key for key in revealed if key in known})
+            # A node is in one frame at most, and a frame left with no node is gone.
+            taken = set()
+            canvas["frames"] = []
+            for frame in frames:
+                members = [key for key in frame.get("nodes", []) if key in known and key not in taken]
+                taken.update(members)
+                if members:
+                    canvas["frames"].append({"title": " ".join(str(frame.get("title", "")).split()), "nodes": members})
         write_json(self.canvas_file, canvas)
         return canvas
 
@@ -194,10 +163,6 @@ def main():
             print(workspace.relative(project.rename(arguments.name).path))
         elif arguments.command == "delete":
             project.delete()
-        elif arguments.command == "subject-add":
-            print(project.add_subject(Path(arguments.image)))
-        elif arguments.command == "subject-remove":
-            project.remove_subject(arguments.file)
     except RecordError as error:
         sys.exit(str(error))
 
@@ -210,12 +175,6 @@ def parse_arguments():
     renaming = commands.add_parser("rename")
     renaming.add_argument("project")
     renaming.add_argument("name")
-    adding = commands.add_parser("subject-add")
-    adding.add_argument("project")
-    adding.add_argument("image")
-    removing = commands.add_parser("subject-remove")
-    removing.add_argument("project")
-    removing.add_argument("file", help="the file name in subjects/, such as 01.png")
     return parser.parse_args()
 
 

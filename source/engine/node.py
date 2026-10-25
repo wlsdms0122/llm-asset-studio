@@ -180,9 +180,8 @@ class Node:
             (self.directory / ".drawing").unlink()
         workspace.heartbeat()
 
-    def view(self, revealed=False):
-        """What the canvas and the conversation show. Reviews stay hidden until the user has acted on the node
-        (built on one of its images, or opened them), so they never steer which image the user takes."""
+    def view(self):
+        """What the canvas and the conversation show."""
         result = self.result() or {}
         made = {output: call for call in self.calls() for output in call.get("outputs", [])}
         return {
@@ -207,9 +206,8 @@ class Node:
                 "description": result.get("descriptions", {}).get(name),
                 "prompt": made.get(name, {}).get("prompt"),
                 "model": made.get(name, {}).get("model"),
-                "review": result.get("reviews", {}).get(name) if revealed else None
+                "review": result.get("reviews", {}).get(name)
             } for name in result.get("images", [])],
-            "reviewed": bool(result.get("reviews")),
             "cost": sum(call.get("cost") or 0 for call in self.calls())
         }
 
@@ -225,10 +223,7 @@ def drawn(directory):
 
 def views(project):
     """Every node of a project as the canvas shows it."""
-    nodes = project.nodes()
-    revealed = set(project.canvas()["revealed"])
-    built_on = {parent.split("/")[1] for node in nodes for parent in node.record["parents"]}
-    return [node.view(revealed=node.id in revealed or node.id in built_on) for node in nodes]
+    return [node.view() for node in project.nodes()]
 
 
 def leaks(project, style):
@@ -262,7 +257,7 @@ def main():
         if arguments.command == "publish":
             node.publish(arguments.files or None, arguments.note, arguments.describe, arguments.review, arguments.drop)
         elif arguments.command == "show":
-            print(json.dumps(node.view(revealed=True), ensure_ascii=False, indent=2))
+            print(json.dumps(node.view(), ensure_ascii=False, indent=2))
         elif arguments.command == "delete":
             node.delete()
     except (RecordError, OSError) as error:

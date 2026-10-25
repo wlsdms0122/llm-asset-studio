@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Serve the studio (web/) over every project in the workspace.
 
-The server writes only records, through the engine's modules: projects and their briefs, styles and the user's own
-changes to them (edits, references, models, extends, restoring a revision, accepting or rejecting a proposal),
-probe runs asked for, nodes (a generation asked for, a tool run here, an upload), the canvas layout, threads and
-the user's answers. It never generates: the agent waits with `open-package watch`, does the work, and publishes;
+The server writes only records, through the engine's modules: projects, styles and the user's own changes to them
+(references, models, extends, restoring a revision, accepting or rejecting a proposal), probe runs asked for, nodes
+(a generation asked for, a tool run here, an upload), the canvas layout, threads and the user's answers. What is
+written in words (a brief, a style's rules, its probes and prompting) the agent writes, from a thread. It never generates: the agent waits with `open-package watch`, does the work, and publishes;
 the open page follows on its own. A tool node runs here, since it draws nothing and costs nothing.
 """
 
@@ -27,7 +27,7 @@ from probe import ProbeRun
 from project import Project
 from proposal import Proposal
 from style import Style
-from thread import Thread, open_ideation, open_style_thread
+from thread import Thread, open_ideation, open_project_thread, open_style_thread
 from workspace import RecordError
 
 ENGINE = Path(__file__).resolve().parent
@@ -100,7 +100,6 @@ def style_detail(style):
         "spec": style.spec(),
         "effective": style.snapshot().spec() if style.extends() else None,
         "probes": style.probes(),
-        "probes_text": workspace.read_text(style.path / "probes.md") or "",
         "models": style.models(),
         "prompting": {model: style.prompting(model) for model in style.models()},
         "references": style.references(),
@@ -155,7 +154,6 @@ class Handler(BaseHTTPRequestHandler):
                     "nodes": views(project),
                     "canvas": project.canvas(),
                     "threads": [thread.summary() for thread in project.threads()],
-                    "subjects": project.subjects(),
                     "agent": agent()
                 })
             if path == "/api/style":
@@ -215,16 +213,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/projects/delete":
             project.delete()
             return {"ok": True}
-        if path == "/api/projects/brief":
-            project.write_brief(body.get("text", ""))
-            return {"ok": True}
-        if path == "/api/subjects/add":
-            return {"path": self.add_image(body, project.add_subject)}
-        if path == "/api/subjects/remove":
-            project.remove_subject(Path(body.get("file", "")).name)
-            return {"ok": True}
         if path == "/api/canvas":
-            return project.save_canvas(body.get("positions"), body.get("frames"), body.get("revealed"))
+            return project.save_canvas(body.get("positions"), body.get("frames"))
         if path == "/api/styles":
             source = self.style({"project": body["from_project"], "style": body["from_style"]}) if body.get("from_project") else None
             style = Style.create(project, body.get("name", "").strip(), bool(body.get("guide")), source)
@@ -236,10 +226,11 @@ class Handler(BaseHTTPRequestHandler):
             self.node(project, body.get("node")).delete()
             return {"ok": True}
         if path == "/api/threads":
-            style = project.style(body.get("style", ""))
             attachments = [self.upload(item) for item in body.get("attachments", [])]
+            if body.get("kind") == "project":
+                return {"thread": open_project_thread(project, message=body.get("message", ""), attachments=attachments, surface="web").id}
             opener = open_ideation if body.get("kind") == "ideation" else open_style_thread
-            return {"thread": opener(style, message=body.get("message", ""), attachments=attachments, surface="web").id}
+            return {"thread": opener(project.style(body.get("style", "")), message=body.get("message", ""), attachments=attachments, surface="web").id}
         if path.startswith("/api/threads/"):
             return self.thread_change(path, project, body)
         if path.startswith("/api/styles/") or path.startswith("/api/proposals/") or path == "/api/runs":
@@ -252,8 +243,6 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/styles/delete":
             style.delete()
             return {"ok": True}
-        if path == "/api/styles/edit":
-            return {"revision": style.edit(body.get("file", ""), body.get("text", ""))}
         if path == "/api/styles/use":
             return {"revision": style.use(body.get("model", ""))}
         if path == "/api/styles/models/delete":
