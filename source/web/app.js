@@ -102,6 +102,9 @@ function readRoute() {
 let route = null;
 let shown = null;
 let loading = false;
+// The route whose page has drawn, and whether its polls are failing; a failing poll keeps that page.
+let drawn = null;
+let failing = false;
 
 function go() {
   if (shown && shown.leave) shown.leave();
@@ -122,13 +125,15 @@ async function load() {
   loading = true;
   try {
     await shown.load(at);
+    if (at === route) { drawn = at; failing = false; }
     $("lost").hidden = true;
     // Pages that do not report the agent still keep the app bar current.
     if (Date.now() - agent.checked > 10000) await api("/api/projects");
   } catch (error) {
     if (at !== route) return;
     if (error.offline) $("lost").hidden = false;
-    else if (error.status === 404 || error.status === 400) renderMissing(error.message);
+    else if ((error.status === 404 || error.status === 400) && drawn !== at) renderMissing(error.message);
+    else if (error.status === 404 || error.status === 400) { if (!failing) toast(error.message, "error"); failing = true; }
     else console.error(error);
   } finally {
     loading = false;
@@ -428,7 +433,7 @@ page("thread", {
     const next = await api(`/api/thread?project=${encode(at.project)}&thread=${encode(at.thread)}`);
     if (at !== route) return;
     const signature = signatureOf(next);
-    if (signature === conversation.signature) return;
+    if (signature === conversation.signature && $("thread-page")) return;
     conversation.signature = signature;
     conversation.data = next;
     renderThread(at);

@@ -65,7 +65,10 @@ page("project", {
 
 // ---------- the page ----------
 
+// What was drawn into an earlier #view is gone, so everything compared against it starts over.
 function buildBoard(at) {
+  if (board.resizes) board.resizes.disconnect();
+  Object.assign(board, { canvasSignature: null, panelSignature: null, stylesSignature: null, cards: new Map(), view: null });
   const viewport = h("div", { class: "canvas", id: "canvas-viewport" }, [
     h("div", { class: "canvas-world", id: "canvas-world" }, [
       h("div", { class: "canvas-frames", id: "canvas-frames" }),
@@ -198,8 +201,9 @@ async function newIdeation() {
 }
 
 async function addSubjects(files) {
+  const project = board.project;
   for (const file of files) {
-    try { await api("/api/subjects/add", { project: board.project, name: file.name, data: await readFile(file) }); }
+    try { await api("/api/subjects/add", { project, name: file.name, data: await readFile(file) }); }
     catch (error) { toast(error.message, "error"); }
   }
   load();
@@ -321,12 +325,13 @@ async function cutout(path) {
 }
 
 async function uploadNodes(files) {
+  const project = board.project;
   let last = null;
   for (const file of files) {
-    try { last = (await api("/api/nodes", { project: board.project, kind: "upload", attachments: [{ name: file.name, data: await readFile(file) }] })).node; }
+    try { last = (await api("/api/nodes", { project, kind: "upload", attachments: [{ name: file.name, data: await readFile(file) }] })).node; }
     catch (error) { toast(error.message, "error"); }
   }
-  if (last) board.focus = last;
+  if (last && board.project === project) board.focus = last;
   load();
 }
 
@@ -728,6 +733,7 @@ function buildComposer() {
   board.noteSlot = h("span", { class: "composer-note" });
   try { board.draft.style = localStorage.getItem(styleKey()); } catch {}
   board.composer = composer({
+    value: board.draft.text,
     placeholder: t("Describe an image to draw"),
     sendTitle: `${t("Draw")} (⌘↵)`,
     onInput: value => { board.draft.text = value; syncComposer(); },
@@ -785,26 +791,36 @@ function removeAttachment(item) {
   syncComposer();
 }
 
+// The text box is locked while the request is on its way; images attached or picked meanwhile stay for the next one.
 async function sendRequest() {
   const draft = board.draft;
+  const box = board.composer;
   if (board.sending || !draft.style || !draft.text.trim()) return;
+  const parents = [...board.selected];
+  const attachments = [...draft.attachments];
   board.sending = true;
-  board.composer.send.disabled = true;
+  box.send.disabled = true;
+  box.input.disabled = true;
   try {
     const made = await api("/api/nodes", {
       project: board.project, kind: "generation", style: draft.style, request: draft.text,
-      parents: [...board.selected], attachments: draft.attachments.map(({ name, data }) => ({ name, data }))
+      parents, attachments: attachments.map(({ name, data }) => ({ name, data }))
     });
-    draft.attachments.forEach(item => URL.revokeObjectURL(item.url));
-    draft.attachments = [];
-    board.composer.input.value = "";
-    board.composer.input.dispatchEvent(new Event("input"));
-    board.selected.clear();
+    box.input.disabled = false;
+    // Another project was opened meanwhile, so its board is not this one's.
+    if (board.draft !== draft) return;
+    attachments.forEach(item => URL.revokeObjectURL(item.url));
+    draft.attachments = draft.attachments.filter(item => !attachments.includes(item));
+    box.input.value = "";
+    box.input.dispatchEvent(new Event("input"));
+    parents.forEach(path => board.selected.delete(path));
     board.focus = made.node;
     board.sending = false;
     syncSelection();
     load();
   } catch (error) {
+    box.input.disabled = false;
+    if (board.draft !== draft) return;
     toast(error.message, "error");
     board.sending = false;
     syncComposer();

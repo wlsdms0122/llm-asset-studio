@@ -19,11 +19,13 @@
   page("style", {
     enter(at) {
       reset(at);
-      api("/api/catalog").then(value => { state.catalog = value.models; if (state.data && state.at === at) render(); }).catch(() => { state.catalog = []; });
+      api("/api/catalog")
+        .then(value => { if (state.at !== at) return; state.catalog = value.models; if (state.data && at === route) render(); })
+        .catch(() => { if (state.at === at) state.catalog = []; });
     },
     async load(at) {
       const data = await api(`/api/style?project=${encode(at.project)}&style=${encode(at.style)}`);
-      if (state.at !== at) return;
+      if (at !== route) return;
       state.data = data;
       render();
     }
@@ -52,10 +54,13 @@
     ].filter(Boolean);
   };
 
-  async function act(work) {
+  // trigger, the button that started the work, stays disabled until the page shows its result.
+  async function act(work, trigger = null) {
+    if (trigger) trigger.disabled = true;
     try { await work(); }
     catch (error) { toast(error.message, "error"); }
     await load();
+    if (trigger) trigger.disabled = false;
   }
 
   // A price too small for money(), such as one per token, keeps its first two digits.
@@ -353,7 +358,7 @@
         data.guide ? null : button(runLabel(model, data.probes.length), { iconName: "play", disabled: !canRun, onClick: () => runProbes(proposal) }),
         h("span", { class: "grow" }),
         button(t("Reject"), { variant: "ghost", onClick: () => rejectProposal(proposal) }),
-        button(t("Accept"), { variant: "success", iconName: "check", disabled: !proposal.applies, title: proposal.applies ? t("Makes it the next revision") : t("No longer applies"), onClick: () => acceptProposal(proposal) })
+        button(t("Accept"), { variant: "success", iconName: "check", disabled: !proposal.applies, title: proposal.applies ? t("Makes it the next revision") : t("No longer applies"), onClick: event => acceptProposal(proposal, event.currentTarget) })
       ]),
       data.guide ? null : comparison(data, proposal)
     ]);
@@ -441,11 +446,11 @@
     };
   }
 
-  async function acceptProposal(proposal) {
+  async function acceptProposal(proposal, trigger) {
     await act(async () => {
       const accepted = await api("/api/proposals/accept", body({ proposal: proposal.id }));
       toast(t("Accepted as revision {revision}", { revision: accepted.revision }));
-    });
+    }, trigger);
   }
 
   async function rejectProposal(proposal) {
@@ -618,7 +623,7 @@
         hint: t("Prompting file"),
         onClick: () => viewPrompting(model),
         aside: h("div", { class: "row model-aside" }, [
-          model === data.model ? pill(t("In use"), { tone: "success", small: true }) : button(t("Use"), { small: true, onClick: event => { event.stopPropagation(); useModel(model); } }),
+          model === data.model ? pill(t("In use"), { tone: "success", small: true }) : button(t("Use"), { small: true, onClick: event => { event.stopPropagation(); useModel(model, event.currentTarget); } }),
           tool("text", t("Prompting file"), () => viewPrompting(model), { quiet: true }),
           model === data.model ? null : tool("trash", t("Remove"), () => removeModel(model), { quiet: true, danger: true })
         ])
@@ -631,11 +636,11 @@
     ask({ title: model, text: state.data.prompting[model] || "", confirm: t("Close") });
   }
 
-  async function useModel(model) {
+  async function useModel(model, trigger) {
     await act(async () => {
       const used = await api("/api/styles/use", body({ model }));
       toast(t("Draws with {model} from revision {revision}", { model: shortModel(model), revision: used.revision }));
-    });
+    }, trigger);
   }
 
   async function removeModel(model) {
@@ -688,12 +693,14 @@
     const top = h("div", { class: "style-actions" }, [
       parents.length ? h("span", { class: "muted", text: t("Built on {bases}", { bases: parents.map(([name, number]) => t("{style} at revision {revision}", { style: name, revision: number })).join(", ") }) }) : null,
       h("span", { class: "grow" }),
-      revision.number === latest ? null : button(t("Restore"), { small: true, iconName: "restore", onClick: () => restoreRevision(revision.number) })
+      revision.number === latest ? null : button(t("Restore"), { small: true, iconName: "restore", onClick: event => restoreRevision(revision.number, event.currentTarget) })
     ]);
     if (!detail) {
+      const at = route;
+      const revisions = state.revisions;
       api(`/api/revision?project=${encode(project())}&style=${encode(style())}&revision=${revision.number}`)
-        .then(value => { state.revisions.set(revision.number, value); render(true); })
-        .catch(error => toast(error.message, "error"));
+        .then(value => { if (at !== route || state.revisions !== revisions) return; revisions.set(revision.number, value); render(true); })
+        .catch(error => { if (at === route) toast(error.message, "error"); });
       return [top, h("p", { class: "muted", text: t("Loading…") })];
     }
     return [
@@ -706,12 +713,12 @@
     ];
   }
 
-  async function restoreRevision(number) {
+  async function restoreRevision(number, trigger) {
     if (!await ask({ title: t("Restore revision {revision}?", { revision: number }), description: t("The style becomes what it was at revision {revision}. This is recorded as a new revision, so nothing is lost.", { revision: number }), confirm: t("Restore"), input: null })) return;
     await act(async () => {
       const restored = await api("/api/styles/restore", body({ revision: number }));
       toast(t("Restored as revision {revision}", { revision: restored.revision }));
-    });
+    }, trigger);
   }
 
   // ---------- extends ----------
