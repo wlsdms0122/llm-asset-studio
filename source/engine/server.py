@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import workspace
 from catalog import catalog
-from node import Node, leaks, run_in_background, views
+from node import Node, run_in_background, views
 from probe import ProbeRun
 from project import Project
 from proposal import Proposal
@@ -93,29 +93,20 @@ def style_summary(style):
 
 
 def style_detail(style):
-    runs = [run.view() for run in ProbeRun.all(style)]
-    current = style.recorded()
     return {
         **style_summary(style),
         "spec": style.spec(),
         "effective": style.snapshot().spec() if style.extends() else None,
         "probes": style.probes(),
         "models": style.models(),
-        "prompting": {model: style.prompting(model) for model in style.models()},
         "references": style.references(),
         "drawn_with": style.snapshot().references(),
         "set_check": style.set_check(),
         "revisions": [{key: entry[key] for key in ("number", "time", "summary", "source", "parents")} for entry in style.revisions()],
-        "current": current,
+        "current": style.recorded(),
         "stale_bases": style.stale_bases(),
-        "dependents": [dependent.name for dependent in style.dependents()],
         "proposals": [proposal.view() for proposal in Proposal.all(style)],
-        "runs": runs,
-        # Probes are stale when the newest finished run of a revision shows one other than the current; a run of a
-        # proposal not accepted shows no revision.
-        "probes_stale": next((run["revision"] for run in reversed(runs) if run["status"] == "done" and run["revision"] is not None), current) != current,
-        "leaks": leaks(style.project, style.name),
-        "threads": [thread.summary() for thread in style.project.threads() if thread.record["style"] == style.name]
+        "runs": [run.view() for run in ProbeRun.all(style)]
     }
 
 
@@ -149,6 +140,7 @@ class Handler(BaseHTTPRequestHandler):
                 project = self.project(query)
                 return self.send_json(200, {
                     "name": project.name,
+                    "purpose": project.purpose(),
                     "brief": project.brief(),
                     "styles": [style_summary(style) for style in project.styles()],
                     "nodes": views(project),
@@ -245,8 +237,6 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": True}
         if path == "/api/styles/use":
             return {"revision": style.use(body.get("model", ""))}
-        if path == "/api/styles/models/delete":
-            return {"revision": style.remove_model(body.get("model", ""))}
         if path == "/api/styles/extends":
             return {"revision": style.set_extends(body.get("extends", []))}
         if path == "/api/styles/restore":
@@ -261,7 +251,7 @@ class Handler(BaseHTTPRequestHandler):
             Proposal(style, body.get("proposal", "")).reject()
             return {"ok": True}
         if path == "/api/runs":
-            run = ProbeRun.request(style, body.get("proposal") or None, body.get("requests", []), surface="web")
+            run = ProbeRun.request(style, body.get("proposal") or None, surface="web")
             return {"run": run.number}
         return None
 

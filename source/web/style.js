@@ -1,17 +1,17 @@
 "use strict";
 
-// The style page, #/p/<project>/s/<style>: a style as a living source. The header says what it builds on, the model
-// in use, its revision, and what keeps it from drawing; tabs show its rules, proposals with their diffs and probe
-// comparisons, probe runs, references with their annotations and set check, models, revisions, what it extends, and
-// its threads. It follows the page-module contract in web/README.md: every poll redraws only the parts whose data
-// changed, and what is expanded lives in the page's state so a redraw keeps it.
+// The style page, #/p/<project>/s/<style>: a style as a living source. The header says what its rules include, the
+// model it draws with, and its revision; the agent's open proposals stand above the tabs, each with its diff and its
+// probes drawn before and after; the tabs show its rules, its references, and its history. What to change is said in
+// the box under the page, which opens a thread. It follows the page-module contract in web/README.md: every poll
+// redraws only the parts whose data changed, and what is expanded lives in the page's state so a redraw keeps it.
 
 (() => {
   const state = {};
 
   function reset(at) {
     Object.assign(state, {
-      at, data: null, tab: at.params.proposal ? "proposals" : at.params.tab || "rules", view: "own",
+      at, data: null, tab: at.params.tab || "rules", view: "own",
       signatures: {}, open: new Map(), revisions: new Map(), focus: at.params.proposal || null, catalog: null
     });
   }
@@ -39,20 +39,11 @@
   const projectFile = path => inProject(project(), path);
   const ROLES = { style: t("Style"), subject: t("Subject"), composition: t("Composition"), guide: t("Guide") };
   const UNITS = { image: t("image"), megapixel: t("megapixel"), token: t("token") };
-  const tabs = () => {
-    const data = state.data;
-    const open = data.proposals.filter(proposal => proposal.status === "open").length;
-    return [
-      { value: "rules", label: t("Rules") },
-      !data.guide || data.proposals.length ? { value: "proposals", label: t("Proposals"), count: open } : null,
-      data.guide ? null : { value: "probes", label: t("Probes"), count: data.runs.length },
-      { value: "references", label: t("References"), count: data.references.length },
-      data.guide ? null : { value: "models", label: t("Models"), count: data.models.length },
-      { value: "revisions", label: t("Revisions"), count: data.revisions.length },
-      { value: "extends", label: t("Extends") },
-      { value: "threads", label: t("Threads"), count: data.threads.length }
-    ].filter(Boolean);
-  };
+  const tabs = () => [
+    { value: "rules", label: t("Rules") },
+    { value: "references", label: t("References"), count: state.data.references.length },
+    { value: "history", label: t("History"), count: state.data.revisions.length }
+  ];
 
   // trigger, the button that started the work, stays disabled until the page shows its result.
   async function act(work, trigger = null) {
@@ -160,8 +151,10 @@
     fill($("view"), h("div", { class: "page style-page", id: "style-page" }, [
       h("header", { class: "style-head", id: "style-head" }),
       h("div", { class: "style-notices", id: "style-notices" }),
+      h("div", { class: "style-proposals", id: "style-proposals" }),
       h("div", { class: "style-tabs", id: "style-tabs" }),
-      h("div", { class: "style-body", id: "style-body" })
+      h("div", { class: "style-body", id: "style-body" }),
+      talkComposer({ placeholder: t("e.g. Corners look too sharp on small icons"), body: { project: project(), style: state.at.style } })
     ]));
   }
 
@@ -179,8 +172,9 @@
     document.title = `${data.name} · Asset Studio`;
     if (!tabs().some(tab => tab.value === state.tab)) state.tab = "rules";
     const pick = keys => Object.fromEntries(keys.map(key => [key, data[key]]));
-    part("head", signatureOf(pick(["name", "purpose", "guide", "extends", "model", "revision", "current", "missing", "leaks"])), renderHead);
-    part("notices", signatureOf(pick(["guide", "missing", "stale_bases", "probes_stale", "probes", "model"]), Boolean(state.catalog)), renderNotices);
+    part("head", signatureOf(pick(["name", "purpose", "guide", "extends", "model", "models", "revision", "current"])), renderHead);
+    part("notices", signatureOf(pick(["guide", "missing", "stale_bases"])), renderNotices);
+    part("proposals", signatureOf(pick(["proposals", "runs", "probes", "model", "guide"]), Boolean(state.catalog)), renderProposals);
     part("tabs", signatureOf(tabs(), state.tab), () => fill($("style-tabs"), tabBar({ items: tabs(), value: state.tab, onChange: switchTab })));
     part("body", signatureOf(pick(TAB_DATA[state.tab]), state.tab, state.view, Boolean(state.catalog)), renderBody);
     if (state.focus) focusProposal();
@@ -189,13 +183,8 @@
   // What each tab shows, so a change elsewhere does not redraw it.
   const TAB_DATA = {
     rules: ["spec", "effective", "extends"],
-    proposals: ["proposals", "runs", "probes", "model", "guide", "current"],
-    probes: ["probes", "runs", "model", "probes_stale"],
     references: ["references", "drawn_with", "set_check", "extends"],
-    models: ["models", "model", "prompting", "drawn_with"],
-    revisions: ["revisions", "current"],
-    extends: ["extends", "stale_bases", "dependents"],
-    threads: ["threads"]
+    history: ["revisions", "current", "runs", "probes", "model", "guide"]
   };
 
   // The tab is kept in the address without a hashchange, so a reload or a shared link opens it and the page stays.
@@ -209,8 +198,7 @@
     const id = state.focus;
     const proposal = state.data.proposals.find(each => each.id === id);
     state.focus = null;
-    if (!proposal) return;
-    if (proposal.status !== "open") { state.open.set(`proposal|${id}`, true); render(true); }
+    if (!proposal || proposal.status !== "open") return;
     const node = $(`proposal-${id}`);
     if (node) requestAnimationFrame(() => { node.scrollIntoView({ block: "start" }); node.classList.add("focused"); });
   }
@@ -218,29 +206,36 @@
   function renderHead() {
     const data = state.data;
     const facts = [
-      data.extends.length ? h("span", {}, [t("Builds on") + " ", ...data.extends.flatMap((name, index) => [index ? ", " : "", h("a", { href: hashes.style(project(), name), text: name })])]) : null,
-      data.guide ? null : h("span", { text: data.model ? t("Draws with {model}", { model: shortModel(data.model) }) : t("No model yet."), title: data.model || "" }),
-      h("span", { text: t("Revision {revision}", { revision: data.revision }), title: data.current == null ? t("Changes since this revision are recorded when the style next draws.") : "" }),
-      data.guide ? null : data.leaks.reviewed
-        ? h("span", { class: data.leaks.leaked ? "warning" : "", text: tn("{leaked} of {count} reviewed image carried something over from a reference", "{leaked} of {count} reviewed images carried something over from a reference", data.leaks.reviewed, { leaked: data.leaks.leaked }) })
-        : h("span", { text: t("No reviewed images yet") })
+      data.extends.length ? h("span", {}, [t("Includes") + " ", ...data.extends.flatMap((name, index) => [index ? ", " : "", h("a", { href: hashes.style(project(), name), text: name })])]) : null,
+      data.guide ? null : modelPicker(data),
+      h("span", { text: t("Revision {revision}", { revision: data.revision }), title: data.current == null ? t("Changes since this revision are recorded when the style next draws.") : "" })
     ].filter(Boolean);
     fill($("style-head"),
       linkButton(project(), hashes.project(project()), { iconName: "previous", variant: "ghost", title: t("Back") }),
       h("div", { class: "style-title" }, [
         h("div", { class: "style-name" }, [
           h("h1", { text: data.name }),
-          data.guide ? pill(t("Guide")) : null,
           tool("more", t("More"), event => { const box = event.currentTarget.getBoundingClientRect(); openMenu({ x: box.left, y: box.bottom + 4 }, [
             { label: t("Rename"), onClick: renameStyle },
+            { label: t("Styles it includes"), onClick: editExtends },
             { label: t("Delete"), danger: true, onClick: deleteStyle }
           ]); }, { quiet: true })
-        ]),
-        button(t("New conversation"), { iconName: "memo", onClick: newConversation })
+        ])
       ]),
       data.purpose ? h("p", { class: "style-purpose", text: data.purpose }) : null,
       h("div", { class: "style-facts" }, facts)
     );
+  }
+
+  // The model it draws with, chosen among the models it has a prompting file for; adding one asks the agent.
+  function modelPicker(data) {
+    const ADD = "\u0000add";
+    if (!data.models.length) return button(t("Add model"), { small: true, variant: "ghost", iconName: "plus", onClick: addModel });
+    return dropdown({
+      value: data.model, title: t("Model it draws with"),
+      options: [...data.models.map(model => ({ value: model, label: shortModel(model), detail: model })), { value: ADD, label: t("Add model…") }],
+      onChange: value => value === ADD ? addModel() : useModel(value)
+    });
   }
 
   function renderNotices() {
@@ -248,17 +243,13 @@
     fill($("style-notices"),
       data.missing && data.missing !== "guide" ? notice(blockedReason(data)) : null,
       data.guide ? notice(blockedReason(data)) : null,
-      data.stale_bases.length ? notice(t("Base changed ({styles}): prompting and probes are behind.", { styles: data.stale_bases.join(", ") }), { tone: "warning" }) : null,
-      !data.guide && data.probes_stale ? notice(t("The style changed since its last probe run."), {
-        tone: "warning",
-        action: data.probes.length && data.model ? button(runLabel(data.model, data.probes.length), { small: true, iconName: "play", onClick: () => runProbes() }) : null
-      }) : null
+      data.stale_bases.length ? notice(t("Base changed ({styles}): prompting and probes are behind.", { styles: data.stale_bases.join(", ") }), { tone: "warning" }) : null
     );
   }
 
   function renderBody() {
     const data = state.data;
-    const draw = { rules: rulesTab, proposals: proposalsTab, probes: probesTab, references: referencesTab, models: modelsTab, revisions: revisionsTab, extends: extendsTab, threads: threadsTab }[state.tab];
+    const draw = { rules: rulesTab, references: referencesTab, history: historyTab }[state.tab];
     fill($("style-body"), h("div", { class: `style-tab style-tab-${state.tab}` }, [draw(data)].flat(Infinity)));
   }
 
@@ -281,57 +272,33 @@
     catch (error) { toast(error.message, "error"); }
   }
 
-  async function newConversation() {
-    const message = await ask({ title: t("New conversation"), description: t("Say what to change or ask about this style. The agent answers in a thread."), placeholder: t("e.g. Corners look too sharp on small icons"), confirm: t("Start") });
-    if (!message) return;
-    try { const made = await api("/api/threads", body({ message })); location.hash = hashes.thread(project(), made.thread); }
-    catch (error) { toast(error.message, "error"); }
-  }
-
   // ---------- rules ----------
 
   function rulesTab(data) {
     const effective = data.extends.length > 0 && state.view === "effective";
     const text = effective ? data.effective : data.spec;
     return [
-      h("div", { class: "style-toolbar" }, [
-        data.extends.length ? h("div", { class: "row" }, [
-          chip(t("Its own words"), { on: !effective, onClick: () => { state.view = "own"; render(); } }),
-          chip(t("Effective style"), { on: effective, onClick: () => { state.view = "effective"; render(); } })
-        ]) : null,
-        h("span", { class: "grow" }),
-        button(t("Change in conversation"), { small: true, iconName: "memo", onClick: newConversation })
-      ]),
+      data.extends.length ? h("div", { class: "style-toolbar" }, [
+        chip(t("Its own words"), { on: !effective, onClick: () => { state.view = "own"; render(); } }),
+        chip(t("Effective style"), { on: effective, onClick: () => { state.view = "effective"; render(); } })
+      ]) : null,
       effective ? h("p", { class: "style-hint", text: t("What it draws with: the sections of the styles it builds on, in order, then its own. A later section replaces one of the same name; Never and Checks add up.") }) : null,
       text && text.trim()
         ? h("div", { class: "style-card" }, [markdownView(text, {
           isOpen: heading => state.open.get(`rules|${state.view}|${heading}`) ?? true,
           onToggle: (heading, open) => state.open.set(`rules|${state.view}|${heading}`, open)
         })])
-        : emptyState({ text: t("No rules yet. The agent writes them in the style's thread.") })
+        : emptyState({ text: t("No rules yet. Say below what the style should be, and the agent writes them.") })
     ];
   }
 
   // ---------- proposals ----------
 
-  function proposalsTab(data) {
-    // Open ones that can still be accepted first, newest first; those the agent has to write again after them.
+  // Open ones that can still be accepted first, newest first; those the agent has to write again after them.
+  function renderProposals() {
+    const data = state.data;
     const open = data.proposals.filter(proposal => proposal.status === "open").reverse().sort((a, b) => Number(b.applies) - Number(a.applies));
-    const decided = data.proposals.filter(proposal => proposal.status !== "open").reverse();
-    return [
-      open.length ? open.map(proposal => proposalCard(data, proposal)) : emptyState({ text: t("No open proposals. When a reaction should hold for every image, the agent proposes a change here.") }),
-      decided.length ? [
-        sectionTitle(t("Decided"), String(decided.length)),
-        h("div", { class: "style-stack" }, decided.map(proposal => disclosure(`proposal|${proposal.id}`, false, [
-          h("span", { class: "style-id", text: proposal.id }),
-          h("span", { class: "disclosure-title", text: proposal.summary }),
-          proposal.status === "accepted"
-            ? pill(t("Accepted as revision {revision}", { revision: proposal.revision }), { tone: "success", small: true })
-            : pill(t("Rejected"), { small: true }),
-          h("span", { class: "disclosure-time", text: when(proposal.decided || proposal.time) })
-        ], () => proposalDetail(data, proposal), "style-card decided")).map((node, index) => { node.id = `proposal-${decided[index].id}`; return node; }))
-      ] : null
-    ];
+    fill($("style-proposals"), open.map(proposal => proposalCard(data, proposal)));
   }
 
   function proposalCard(data, proposal) {
@@ -339,7 +306,7 @@
     const canRun = Boolean(model) && data.probes.length > 0 && !data.guide && proposal.applies;
     return h("article", { class: "style-card proposal", id: `proposal-${proposal.id}` }, [
       h("div", { class: "proposal-head" }, [
-        h("span", { class: "style-id", text: proposal.id }),
+        pill(t("The agent proposes"), { tone: "accent", small: true }),
         h("h3", { text: proposal.summary }),
         proposal.applies ? null : pill(t("Out of date"), { tone: "warning", small: true })
       ]),
@@ -433,7 +400,7 @@
       path: projectFile(image.path),
       name: `${project()}-${style()}-${fileName(image.path)}`,
       add: () => addImage(image.path),
-      info: [[t("Request"), image.request], [t("Drawn with"), label], [t("Review"), image.review ? reviewLine(image.review) : null], [t("Prompt"), image.prompt, true]]
+      info: [[t("Request"), image.request], [t("Drawn with"), label], [t("Prompt"), image.prompt, true]]
     };
   }
 
@@ -449,26 +416,13 @@
     await act(() => api("/api/proposals/reject", body({ proposal: proposal.id })));
   }
 
-  // A run asked for here: of a proposal, or of the current revision with any extra requests of the user's.
+  // A run of a proposal, compared with the current revision's; without one, a run of the current revision.
   async function runProbes(proposal = null) {
-    const data = state.data;
-    const model = proposal ? proposalModel(proposal) : data.model;
-    const count = data.probes.length;
-    let requests = [];
-    if (proposal) {
-      if (!await ask({ title: t("Run probes with {id}", { id: proposal.id }), description: `${costLine(model, count)} ${t("They are shown next to the current revision's run, request by request.")}`, confirm: t("Run"), input: null })) return;
-    } else {
-      const each = costOfImage(model);
-      const extra = await ask({
-        title: t("Run probes"),
-        description: `${costLine(model, count)} ${each != null ? t("Add requests of your own, one per line, if you like; each adds {price}.", { price: price(each) }) : t("Add requests of your own, one per line, if you like.")}`,
-        placeholder: t("e.g. an app icon for a chess club: a knight"), confirm: t("Run")
-      });
-      if (extra == null) return;
-      requests = extra.split("\n").map(line => line.replace(/^-\s*/, "").trim()).filter(Boolean);
-    }
+    const model = proposal ? proposalModel(proposal) : state.data.model;
+    const description = `${costLine(model, state.data.probes.length)} ${proposal ? t("They are shown next to the current revision's run, request by request.") : ""}`.trim();
+    if (!await ask({ title: proposal ? t("Run probes with {id}", { id: proposal.id }) : t("Run probes"), description, confirm: t("Run"), input: null })) return;
     await act(async () => {
-      const made = await api("/api/runs", body({ proposal: proposal ? proposal.id : null, requests }));
+      const made = await api("/api/runs", body({ proposal: proposal ? proposal.id : null }));
       toast(t("Asked for run {number}", { number: made.run }));
     });
   }
@@ -481,58 +435,6 @@
       toast(error.message, "error");
     }
     await load();
-  }
-
-  // ---------- probes ----------
-
-  function probesTab(data) {
-    const runs = [...data.runs].reverse();
-    return [
-      h("section", { class: "style-card" }, [
-        sectionTitle(t("Probe requests"), button(t("Change in conversation"), { small: true, variant: "ghost", iconName: "memo", onClick: newConversation })),
-        data.probes.length
-          ? h("ol", { class: "style-probes" }, data.probes.map(text => h("li", { text })))
-          : h("p", { class: "muted", text: t("No probes yet. The agent writes them when the words hold.") }),
-        h("div", { class: "style-actions" }, [
-          button(runLabel(data.model, data.probes.length), { variant: "success", iconName: "play", disabled: !data.probes.length || !data.model, onClick: () => runProbes() }),
-          h("span", { class: "muted", text: data.model ? t("Draws every probe with the current revision.") : t("No model yet.") })
-        ])
-      ]),
-      sectionTitle(t("Runs"), runs.length ? String(runs.length) : null),
-      runs.length
-        ? h("div", { class: "style-stack" }, runs.map((run, index) => disclosure(`run|${run.number}`, index < 2 || run.status !== "done", runSummary(run), () => runDetail(run), "style-card run")))
-        : emptyState({ text: t("No runs yet. A run draws every probe once, so you can see the style on subjects it has not shown.") })
-    ];
-  }
-
-  function runSummary(run) {
-    return [
-      h("span", { class: "disclosure-title", text: t("Run {number}", { number: run.number }) }),
-      pill(runTarget(run), { small: true, tone: run.proposal ? "accent" : "" }),
-      statusPill(run),
-      h("span", { class: "disclosure-time", text: [shortModel(run.model), when(run.time), run.cost ? money(run.cost) : null].filter(Boolean).join(" · ") })
-    ];
-  }
-
-  function runDetail(run) {
-    const items = [];
-    if (run.images.every(image => !image.path)) {
-      return [
-        run.status === "drawing" ? workingNote(t("Drawing the probes.")) : h("p", { class: "muted", text: agentAttached() ? t("Waiting for the agent to start.") : t("No agent is attached, so this waits. Start one with open-package watch.") }),
-        h("ol", { class: "style-probes" }, run.images.map(image => h("li", { text: image.request })))
-      ];
-    }
-    return [
-      run.note ? h("p", { class: "run-note", text: run.note }) : null,
-      h("div", { class: "probe-grid" }, run.images.map(image => h("figure", { class: "probe" }, [
-        image.path ? (() => {
-          const index = items.push(probeItem(image, runTarget(run))) - 1;
-          return imageFrame(projectFile(image.path), { fit: "fill", onClick: () => openLightbox(items, index), tools: [tool("reference", t("Add to references"), () => addImage(image.path))] });
-        })() : h("div", { class: `probe-pending${run.status === "drawing" ? " live" : ""}` }, [run.status === "drawing" ? h("span", { class: "spinner" }) : null]),
-        h("figcaption", { text: image.request }),
-        image.review ? reviewLine(image.review) : null
-      ])))
-    ];
   }
 
   // ---------- references ----------
@@ -605,38 +507,11 @@
 
   // ---------- models ----------
 
-  function modelsTab(data) {
-    return [
-      sectionTitle(t("Models"), button(t("Add model"), { small: true, variant: "ghost", iconName: "plus", onClick: addModel })),
-      data.models.length ? rowList(data.models.map(model => listRow({
-        title: model,
-        specs: modelSpecs(model),
-        hint: t("Prompting file"),
-        onClick: () => viewPrompting(model),
-        aside: h("div", { class: "row model-aside" }, [
-          model === data.model ? pill(t("In use"), { tone: "success", small: true }) : button(t("Use"), { small: true, onClick: event => { event.stopPropagation(); useModel(model, event.currentTarget); } }),
-          tool("text", t("Prompting file"), () => viewPrompting(model), { quiet: true }),
-          model === data.model ? null : tool("trash", t("Remove"), () => removeModel(model), { quiet: true, danger: true })
-        ])
-      }))) : emptyState({ text: t("No models yet. The agent picks one when the words hold.") }),
-      h("p", { class: "style-hint", text: t("Each model has its own prompting file: how this style is written as a prompt for it. Adding a model is a proposal you try with probes.") })
-    ];
-  }
-
-  function viewPrompting(model) {
-    ask({ title: model, text: state.data.prompting[model] || "", confirm: t("Close") });
-  }
-
-  async function useModel(model, trigger) {
+  async function useModel(model) {
     await act(async () => {
       const used = await api("/api/styles/use", body({ model }));
       toast(t("Draws with {model} from revision {revision}", { model: shortModel(model), revision: used.revision }));
-    }, trigger);
-  }
-
-  async function removeModel(model) {
-    if (!await ask({ title: t("Remove {model}?", { model: shortModel(model) }), description: t("Its prompting file goes. Earlier revisions keep it."), confirm: t("Remove"), input: null, danger: true })) return;
-    await act(() => api("/api/styles/models/delete", body({ model })));
+    });
   }
 
   // Only models that take as many references as the style draws with are offered; the agent writes the model's
@@ -662,10 +537,11 @@
     catch (error) { toast(error.message, "error"); }
   }
 
-  // ---------- revisions ----------
+  // ---------- history ----------
 
-  function revisionsTab(data) {
+  function historyTab(data) {
     const latest = data.revisions.length;
+    const runs = [...data.runs].reverse();
     return [
       h("p", { class: "style-hint", text: t("Every change is a revision, recorded on its own. Any of them can be looked at or made current again.") }),
       h("div", { class: "style-stack" }, [...data.revisions].reverse().map(revision => disclosure(`revision|${revision.number}`, false, [
@@ -674,7 +550,40 @@
         pill(sourceLabel(revision.source), { small: true }),
         revision.number === latest ? pill(t("Latest"), { tone: "success", small: true }) : null,
         h("span", { class: "disclosure-time", text: when(revision.time), title: stamp(revision.time) })
-      ], () => revisionDetail(revision, latest), "style-card revision")))
+      ], () => revisionDetail(revision, latest), "style-card revision"))),
+      data.guide ? null : [
+        sectionTitle(t("Probe runs"), data.probes.length && data.model ? button(runLabel(data.model, data.probes.length), { small: true, variant: "ghost", iconName: "play", onClick: () => runProbes() }) : null),
+        runs.length
+          ? h("div", { class: "style-stack" }, runs.map((run, index) => disclosure(`run|${run.number}`, index === 0 || run.status !== "done", runSummary(run), () => runDetail(run), "style-card run")))
+          : h("p", { class: "style-hint", text: t("No runs yet. A run draws every probe once, so you can see the style on subjects it has not shown.") })
+      ]
+    ];
+  }
+
+  function runSummary(run) {
+    return [
+      h("span", { class: "disclosure-title", text: t("Run {number}", { number: run.number }) }),
+      pill(runTarget(run), { small: true, tone: run.proposal ? "accent" : "" }),
+      statusPill(run),
+      h("span", { class: "disclosure-time", text: [shortModel(run.model), when(run.time), run.cost ? money(run.cost) : null].filter(Boolean).join(" · ") })
+    ];
+  }
+
+  // The run's images, each under the probe request it answers; any of them can go into the references.
+  function runDetail(run) {
+    if (run.images.every(image => !image.path)) {
+      return run.status === "drawing" ? workingNote(t("Drawing the probes.")) : h("p", { class: "muted", text: agentAttached() ? t("Waiting for the agent to start.") : t("No agent is attached, so this waits. Start one with open-package watch.") });
+    }
+    const items = [];
+    return [
+      run.note ? h("p", { class: "run-note", text: run.note }) : null,
+      h("div", { class: "probe-grid" }, run.images.map(image => h("figure", { class: "probe" }, [
+        image.path ? (() => {
+          const index = items.push(probeItem(image, runTarget(run))) - 1;
+          return imageFrame(projectFile(image.path), { fit: "fill", onClick: () => openLightbox(items, index), tools: [tool("reference", t("Add to references"), () => addImage(image.path))] });
+        })() : h("div", { class: "probe-missing", text: t("Not in that run") }),
+        h("figcaption", { text: image.request })
+      ])))
     ];
   }
 
@@ -712,28 +621,7 @@
     }, trigger);
   }
 
-  // ---------- extends ----------
-
-  function extendsTab(data) {
-    return [
-      h("section", { class: "style-card" }, [
-        sectionTitle(t("Builds on"), button(t("Change"), { small: true, variant: "ghost", iconName: "pencil", onClick: editExtends })),
-        data.extends.length
-          ? h("ol", { class: "style-links" }, data.extends.map(name => h("li", {}, [
-            h("a", { href: hashes.style(project(), name), text: name }),
-            data.stale_bases.includes(name) ? pill(t("Changed since its prompting was written"), { tone: "warning", small: true }) : null
-          ])))
-          : h("p", { class: "muted", text: t("It builds on no other style.") }),
-        h("p", { class: "style-hint", text: t("Sections are taken in order and its own come last: a later section replaces one of the same name, except Never and Checks, which add up.") })
-      ]),
-      h("section", { class: "style-card" }, [
-        sectionTitle(t("Built on by")),
-        data.dependents.length
-          ? h("ul", { class: "style-links" }, data.dependents.map(name => h("li", {}, [h("a", { href: hashes.style(project(), name), text: name })])))
-          : h("p", { class: "muted", text: t("No style builds on this one yet.") })
-      ])
-    ];
-  }
+  // ---------- what it includes ----------
 
   async function editExtends() {
     let styles;
@@ -742,7 +630,7 @@
     const others = styles.filter(each => each.name !== style());
     if (!others.length) return toast(t("This project has no other styles."), "error");
     const picker = orderPicker({ items: others.map(each => ({ value: each.name, title: each.name, detail: each.guide ? t("Guide") : each.purpose })), chosen: state.data.extends });
-    const chosen = await ask({ title: t("Builds on"), description: t("Later ones win where sections share a name."), content: picker, result: () => picker.value(), confirm: t("Save"), input: null });
+    const chosen = await ask({ title: t("Styles it includes"), description: t("Its rules include the sections of these styles, in order; later ones win where sections share a name, and its own come last."), content: picker, result: () => picker.value(), confirm: t("Save"), input: null });
     if (!chosen || JSON.stringify(chosen) === JSON.stringify(state.data.extends)) return;
     await act(async () => {
       const saved = await api("/api/styles/extends", body({ extends: chosen }));
@@ -750,19 +638,4 @@
     });
   }
 
-  // ---------- threads ----------
-
-  function threadsTab(data) {
-    const threads = [...data.threads].sort((a, b) => b.updated.localeCompare(a.updated));
-    return [
-      sectionTitle(t("Threads"), button(t("New conversation"), { small: true, variant: "ghost", iconName: "plus", onClick: newConversation })),
-      threads.length ? rowList(threads.map(thread => listRow({
-        title: thread.title || THREAD_NAMES[thread.kind],
-        detail: `${THREAD_NAMES[thread.kind]} · ${when(thread.updated)}`,
-        onClick: () => { location.hash = hashes.thread(project(), thread.id); },
-        aside: thread.waiting ? pill(t("Your turn"), { tone: "accent", dot: "static", small: true })
-          : agentAttached() ? pill(t("Working"), { tone: "accent", dot: "live", small: true }) : pill(t("Waiting for the agent"), { small: true })
-      }))) : emptyState({ text: t("No threads yet. Start a conversation to change or ask about this style.") })
-    ];
-  }
 })();

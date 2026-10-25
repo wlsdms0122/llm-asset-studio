@@ -1,7 +1,7 @@
 "use strict";
 
-// The studio's shell and the pages it owns: the app bar, the router and polling, the lightbox, home, the thread page,
-// and the archive. The project canvas is in canvas.js and the style page in style.js; each registers itself with page().
+// The studio's shell and the pages it owns: the app bar, the router and polling, the lightbox, home, the brief, the
+// thread page, and the archive. The project canvas is in canvas.js and the style page in style.js; each registers itself with page().
 // Everything is built from the components in ui.js.
 
 // ---------- small helpers ----------
@@ -81,6 +81,7 @@ const hashes = {
   home: () => "#/",
   archive: () => "#/archive",
   project: (project, node = null) => `#/p/${encode(project)}${node ? `?node=${encode(node)}` : ""}`,
+  brief: project => `#/p/${encode(project)}/brief`,
   style: (project, style, proposal = null) => `#/p/${encode(project)}/s/${encode(style)}${proposal ? `?proposal=${encode(proposal)}` : ""}`,
   thread: (project, thread) => `#/p/${encode(project)}/t/${encode(thread)}`
 };
@@ -91,6 +92,7 @@ function readRoute() {
   try { parts = path.split("/").map(decodeURIComponent); } catch { parts = []; }
   const params = Object.fromEntries(new URLSearchParams(query));
   if (parts[0] === "p" && parts[1]) {
+    if (parts[2] === "brief") return { name: "brief", project: parts[1], params };
     if (parts[2] === "s" && parts[3]) return { name: "style", project: parts[1], style: parts[3], params };
     if (parts[2] === "t" && parts[3]) return { name: "thread", project: parts[1], thread: parts[3], params };
     return { name: "project", project: parts[1], params };
@@ -227,20 +229,6 @@ function panelResizer() {
 }
 try { const saved = Number(localStorage.getItem("panel-width")); if (saved) document.documentElement.style.setProperty("--panel", `${saved}px`); } catch {}
 
-// A review is "verdict: text" (document/review.md); the verdict is shown in the viewer's language.
-const VERDICTS = { pass: [t("Pass"), "success"], instance: [t("Flaw in this image"), ""], drift: [t("Style drift"), "danger"], leak: [t("Reference leak"), "danger"] };
-
-function readReview(text) {
-  const match = /^\s*(pass|instance|drift|leak)\b\s*[:：—-]?\s*([\s\S]*)$/i.exec(text || "");
-  return match ? { verdict: match[1].toLowerCase(), text: match[2].trim() } : { verdict: null, text: text || "" };
-}
-
-function reviewLine(text) {
-  const review = readReview(text);
-  const [label, tone] = VERDICTS[review.verdict] || [t("Review"), ""];
-  return h("div", { class: "review", title: review.text }, [pill(label, { tone, small: true }), review.text ? h("span", { text: review.text }) : null]);
-}
-
 // Why a style cannot draw, from what the engine says it lacks.
 function blockedReason(style) {
   return {
@@ -266,6 +254,41 @@ async function addToReferences(project, path, styles = null) {
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+// The box under a document the agent writes (a brief, a style): what the user writes there opens a thread about the
+// document with those words, and any images attached, as its first answer. body names the document for /api/threads.
+function talkComposer({ placeholder, body }) {
+  let attachments = [];
+  let sending = false;
+  const box = composer({
+    placeholder,
+    sendTitle: `${t("Send")} (⌘↵)`,
+    onInput: () => sync(),
+    onSend: async () => {
+      if (sending || !box.input.value.trim()) return;
+      sending = true;
+      sync();
+      try {
+        const made = await api("/api/threads", { ...body, message: box.input.value, attachments: attachments.map(({ name, data }) => ({ name, data })) });
+        location.hash = hashes.thread(body.project, made.thread);
+      } catch (error) {
+        toast(error.message, "error");
+        sending = false;
+        sync();
+      }
+    },
+    attach: uploadButton(t("Attach images"), async files => {
+      for (const file of files) attachments.push({ key: `${file.name}|${attachments.length}`, name: file.name, data: await readFile(file), url: URL.createObjectURL(file) });
+      sync();
+    }, { variant: "ghost" })
+  });
+  const sync = () => {
+    box.setImages(attachments.map(item => ({ key: item.key, node: thumb(item.name, { src: item.url, title: item.name, remove: () => { URL.revokeObjectURL(item.url); attachments = attachments.filter(each => each !== item); sync(); } }) })));
+    box.send.disabled = sending || !box.input.value.trim();
+  };
+  sync();
+  return h("div", { class: "page-dock" }, [box]);
 }
 
 // ---------- lightbox ----------
@@ -424,6 +447,57 @@ async function deleteProject(project) {
 // ---------- thread page ----------
 
 // The conversation lives as long as the page; the composer and its draft live as long as the round they answer.
+// ---------- brief ----------
+
+// #/p/<project>/brief: the brief every style and image in the project reads. The agent writes it; what to change is
+// said in the box under it.
+const briefPage = { signature: null };
+
+page("brief", {
+  enter() { briefPage.signature = null; },
+  async load(at) {
+    const data = await api(`/api/project?project=${encode(at.project)}`);
+    if (at !== route) return;
+    const threads = data.threads.filter(thread => thread.kind === "project");
+    const signature = signatureOf({ brief: data.brief, threads });
+    if (signature === briefPage.signature && $("brief-page")) return;
+    briefPage.signature = signature;
+    renderBrief(at, data.brief, threads);
+  }
+});
+
+function renderBrief(at, brief, threads) {
+  document.title = `${t("Brief")} · ${at.project} · Asset Studio`;
+  if (!$("brief-page")) {
+    fill($("view"), h("div", { class: "page doc-page", id: "brief-page" }, [
+      h("header", { class: "doc-head" }, [
+        linkButton(at.project, hashes.project(at.project), { iconName: "previous", variant: "ghost", title: t("Back") }),
+        h("h1", { text: t("Brief") }),
+        h("p", { class: "doc-lead", text: t("What the images in this project are for. Every style and image here reads it.") })
+      ]),
+      h("div", { id: "brief-body" }),
+      talkComposer({
+        placeholder: brief.trim() ? t("e.g. The icons sit on a dark home screen, so keep them bright") : t("e.g. Icons for a budgeting app for people in their twenties"),
+        body: { project: at.project, kind: "project" }
+      })
+    ]));
+  }
+  const sorted = [...threads].sort((a, b) => b.updated.localeCompare(a.updated));
+  fill($("brief-body"),
+    brief.trim() ? h("div", { class: "style-card" }, [markdownView(brief)]) : emptyState({ text: t("No brief yet. Say below what the project is for, and the agent writes it.") }),
+    sorted.length ? [
+      sectionTitle(t("Threads"), String(sorted.length)),
+      rowList(sorted.map(thread => listRow({
+        title: thread.title || THREAD_NAMES[thread.kind],
+        detail: when(thread.updated),
+        onClick: () => { location.hash = hashes.thread(at.project, thread.id); },
+        aside: thread.waiting ? pill(t("Your turn"), { tone: "accent", dot: "static", small: true })
+          : agentAttached() ? pill(t("Working"), { tone: "accent", dot: "live", small: true }) : pill(t("Waiting for the agent"), { small: true })
+      })))
+    ] : null
+  );
+}
+
 const conversation = { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false, sending: false };
 
 page("thread", {

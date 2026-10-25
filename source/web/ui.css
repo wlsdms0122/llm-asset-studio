@@ -128,6 +128,7 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .dropdown { display: inline-flex; align-items: center; justify-content: space-between; gap: var(--space-2); max-width: 220px; height: var(--control-sm); padding: 0 10px 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
 .dropdown:hover { border-color: var(--fg-faint); }
 .dropdown span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown span:last-child { display: flex; flex: none; overflow: visible; }
 .dropdown svg.icon { width: 14px; height: 14px; color: var(--fg-muted); }
 
 /* ---------- menu ---------- */

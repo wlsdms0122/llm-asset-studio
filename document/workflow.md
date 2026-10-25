@@ -12,7 +12,7 @@ The web page and the conversation are two surfaces over the same records. Whatev
 
 A project is one purpose: an app, a blog, a product line (`project.py new <name>`). Its `project.md`, the brief, says what the images are for, where they are seen and at what size, who sees them, the brand's colors and tone, and the decisions that hold for every image in it. The agent reads it before writing any prompt for the project.
 
-The agent writes the brief, the way it writes a style's words; the user tells. A project thread is that conversation ("Write in conversation" or "Change in conversation" beside the brief, or `thread.py open projects/<p> project`): the agent asks what the project is for, writes `project.md` in English, and publishes a round that says what it wrote and what is still open. It keeps the brief current: a decision the user makes for the whole project (the colors of an app), wherever it was said, goes into `project.md` or into a guide (see Extends and guides), never only into one prompt.
+The agent writes the brief, the way it writes a style's words; the user tells. A project thread is that conversation (what the user writes under the brief on its page, or `thread.py open projects/<p> project`): the agent asks what the project is for, writes `project.md` in English, and publishes a round that says what it wrote and what is still open. It keeps the brief current: a decision the user makes for the whole project (the colors of an app), wherever it was said, goes into `project.md` or into a guide (see Extends and guides), never only into one prompt.
 
 A style lives in one project. To use a style in another project, copy it (`style.py new <project> <name> --from <style>`); the copy starts as its own first revision and says where it came from. Styles that should improve together live in one project and extend the same base.
 
@@ -20,7 +20,7 @@ A style lives in one project. To use a style in another project, copy it (`style
 
 A style is its files: `style.md` (the style in words), `style.json` (the model in use, the styles it extends, whether it is a guide), `probes.md`, `prompting/<model>.md`, and `references/` with an annotation beside each image. Every change to them is a revision:
 
-- The user's own changes (an edit on the style page, a reference added or removed, the model switched, extends changed, a revision restored, a proposal accepted) record a revision at once.
+- The user's own changes (a reference added or removed, the model switched, extends changed, a revision restored, a proposal accepted) record a revision at once.
 - The agent's edits are recorded with `style.py revise <style> --summary "<what changed>"` when a step is done. Anything left unrecorded is recorded the moment the style draws, so every image names a real revision.
 - Each revision keeps the hash of every file, and the contents stay in the workspace's `objects/`, so any revision can be shown (`style.py effective --revision N`) or restored (`style.py restore`).
 
@@ -28,11 +28,11 @@ The user never manages versions. Revisions pile up on their own, like commits.
 
 ## Making a style
 
-A new style opens a style thread with the first question (`style.py new <project> <name>`, or "New style" on the web). The thread is the conversation that finds the style; see Discovering a style.
+A new style opens a style thread with the first question (`style.py new <project> <name>`, or "New style" on the web). The thread is the conversation that finds the style; see Discovering a style. A style made on the web starts as one that draws; when the conversation shows it only lends rules (a palette, a brand's tone), the agent sets `guide` in its `style.json` (see Extends and guides).
 
 1. Discover, in the thread: the agent writes `style.md` from the conversation, shows draft candidates when a picture settles a question faster than words, and asks what changes the image most.
 2. When the words hold, the agent picks the model (`models.md`), writes `style.json`'s model and `prompting/<model>.md`, and writes `probes.md`: six to eight requests that cover the style's range, at least half of them subjects the conversation never showed (see Probes). It records the revision and says in the thread that the style is ready to try, with what a probe run costs.
-3. The user runs the probes (the style page's "Run probes", or asks in the thread; `probe.py request <style>`). With no references yet, the run draws from the words alone, the way sample images did. The user may add requests of their own to a run. Reactions go back into the thread, and the agent keeps fixing `style.md` and the prompting file and asks for another run when it helps.
+3. The user runs the probes ("Run probes" under the style page's History, or asks in the thread; `probe.py request <style>`). With no references yet, the run draws from the words alone, the way sample images did. The user may ask in the thread for requests of their own in a run. Reactions go back into the thread, and the agent keeps fixing `style.md` and the prompting file and asks for another run when it helps.
 4. The user picks references from the probe images (any image can be added to the references wherever it is shown). From the first style reference on, the style can draw (`Style.blocked` says what is missing until then). The agent annotates each reference and checks the set (see References).
 
 From then on there is no separate stage: the style is used and improved in the same way.
@@ -62,7 +62,7 @@ Talk comes before pictures. While the direction is unclear, at any point in the 
 
 ## Improving a style
 
-Reactions come from anywhere: a note in a thread, a request on the canvas that keeps asking for the same change, a review that keeps finding the same drift, or the user editing a rule on the style page. The agent sorts every reaction before acting on it:
+Reactions come from anywhere: a note in a thread, a request on the canvas that keeps asking for the same change, a review that keeps finding the same drift, or what the user writes under the style on its page. The agent sorts every reaction before acting on it:
 
 - About this image only (a wrong count, one odd leaf): it goes into the next prompt, as a new node. The style does not change.
 - Something `style.md` already asks for and the model missed: a change to the prompting file.
@@ -85,7 +85,7 @@ While a style has no references yet (it is being made), the agent edits its file
 - One request that breaks the style easily (a subject with its own strong look: metal, glass, a building) and one at the edge of the domain the style is scoped to.
 - Plain requests in the user's language or English, each a real request a user would make.
 
-A run draws one image per request with the run's revision or proposal, the references chosen per request as in generating, and is published in request order (`probe.py publish <run> <files...>`) with a note on what changed against the run it is compared with and a review per image. Probes are stale when the style changed after its last run (a new revision, or a base it extends changed); the style page says so.
+A run draws one image per request with the run's revision or proposal, the references chosen per request as in generating, and is published in request order (`probe.py publish <run> <files...>`) with a note on what changed against the run it is compared with and a review per image. Probes are stale when the style changed after its last run (a new revision, or a base it extends changed).
 
 ## References
 
@@ -102,7 +102,7 @@ A reference is an image, its role, and what a generation takes from it. The role
 - **The set.** Style models are usually trained on many images that share a style; the prompt-level equivalent is the reference set. With one or two references a model copies them; with several it keeps what they share. Four to eight is the aim when the model takes them at no extra cost. What the references share is what the model learns, so everything that should not be learned (subject, color scheme, layout, background, angle) varies across them; two cream references made every result cream. Only clean examples: a reference with a defect teaches the defect. After every change to the set the agent checks what the style references share besides the style and records it (`style.py set-check <style> --shared "<what they share>"`, nothing when the set is varied); the style page shows it, and a shared property is a reason to suggest varying the set. `watch` hands over a set changed since its check.
 - **Only the user puts images in.** The agent may suggest a reference (a new subject that came out right) and may propose removing one, but adding one is the user's act, so what the model learns stays what the user recognized as the style.
 - **Choosing per generation.** Not every style reference goes with every generation. The agent leaves out a reference that shows nearly the same subject as the request (its pose and size come through however the prompt measures them) and attaches the rest, at least three when the style has them, style references first, then subject and composition references with the property each is for named. What was left out and why is recorded on the node (`node.py publish --drop 03.jpg="same subject as the request"`). How a model is told the roles is in the style's prompting file (see Prompting per model).
-- **Leakage.** Review has a fourth check: what came over from a reference that the request did not ask for (its subject, its color layout, its composition). A leak is recorded as the image's verdict (`review.md`), the style page shows each style's leak count, and repeated leaks from one reference are a reason to propose removing it or rewriting its annotation.
+- **Leakage.** Review has a fourth check: what came over from a reference that the request did not ask for (its subject, its color layout, its composition). A leak is recorded as the image's verdict (`review.md`), and repeated leaks from one reference are a reason to propose removing it or rewriting its annotation.
 
 ## Extends and guides
 
@@ -148,7 +148,7 @@ For a user who does not know yet what the image should be, an ideation thread wo
 
 ## Surfaces
 
-- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: a card per node with its request and images, an edge from each parent's card to the node built on it, groups (frames) that move their nodes together, and the composer; beside it the brief, the styles, and the threads. Selecting a node opens its inspector: the full request, the agent's notes, the reviews folded until the user opens them (so they do not steer the pick), what it was made with, and the references used and left out. A style's page has its rules, the proposals with their diffs and probe comparisons, the probe runs, the references with their annotations and set check, the models, the revisions, and what it extends. A thread's page is the conversation. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
+- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: a card per node with its request and images, an edge from each parent's card to the node built on it, groups (frames) that move their nodes together, and the composer; beside it the brief, the styles, and the threads. A card shows what was asked and what came out; selecting a node opens its inspector with how it was made: the images it builds on, the agent's notes, the model and the style at its revision, the references used and left out, and the prompt. Reviews are the agent's own check and are not shown; what follows from them reaches the user as a redraw or a proposal. The brief and each style have a page with the document and a box under it, where what the user writes opens a thread. A style's page shows what it includes and the model it draws with, the open proposals with their diffs and probe comparisons above its tabs, and tabs for its rules, its references with their annotations and set check, and its history (revisions and probe runs). A thread's page is the conversation. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
 - Conversation: the agent sends a numbered sheet (`sheet.py <thread | node | run>`), records the user's reply with `thread.py answer`, adds nodes with `node.py add`, and asks for runs with `probe.py request`.
 
 The server writes only records: projects, styles and the user's own changes to them (references, models, extends, restoring a revision), proposals accepted or rejected, probe runs asked for, nodes asked for (a tool node it runs itself), the canvas layout, threads and answers. What is written in words (the brief, a style's rules, its probes and prompting) the agent writes, from a thread. Generation always goes through the agent.

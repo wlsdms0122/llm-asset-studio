@@ -1,9 +1,10 @@
 "use strict";
 
-// The project page: an infinite canvas of everything made in the project, the panel beside it (the brief, styles,
-// threads), the composer under it, and the inspector over its right side with everything about the selected nodes.
-// A card shows what was asked and what came out; an edge runs from a parent's card to the node built on it, and the
-// child names the image it builds on. Frames from canvas.json group nodes under a title and move them together.
+// The project page: an infinite canvas of everything made in the project, the panel beside it (what the project is
+// for, styles, threads), the composer under it, and the inspector over its right side. A card shows what was asked
+// and what came out; the inspector shows how the selected node was made. An edge runs from a parent's card to the node
+// built on it, and the child names the image it builds on. Frames from canvas.json group nodes under a title and move
+// them together. A dragged card snaps to the edges and centers of the cards around it.
 // Nodes the user has not placed are laid out by lineage: roots by frame and time, each child to the right of its parent.
 
 const CARD_WIDTH = 304;
@@ -17,6 +18,8 @@ const ZOOM_RANGE = [0.15, 2];
 // The least zoom a canvas opens at, and the room left around fitted content (the top clears the canvas tools).
 const FIRST_ZOOM = 0.5;
 const FIT_MARGIN = { side: 48, top: 72, bottom: 24 };
+// How near, on screen, an edge or center comes to another card's before a drag snaps to it.
+const SNAP = 6;
 
 const board = {};
 
@@ -26,7 +29,7 @@ function resetBoard(project) {
     project, data: null, canvasSignature: null, panelSignature: null, stylesSignature: null, inspectorSignature: null,
     view: null, cards: new Map(), sizes: new Map(), geometry: new Map(), chips: new Map(), positions: {}, saved: {},
     saveTimer: null, saving: false, viewTimer: null,
-    picked: new Set(), selected: new Set(), reviews: new Set(),
+    picked: new Set(), selected: new Set(),
     draft: { text: "", attachments: [], style: null }, composer: null, sending: false,
     focus: null, spaceHeld: false, frame: null, dragging: null
   });
@@ -76,7 +79,8 @@ function buildBoard(at) {
     h("div", { class: "canvas-world", id: "canvas-world" }, [
       h("div", { class: "canvas-frames", id: "canvas-frames" }),
       svgNode("svg", { class: "canvas-edges", id: "canvas-edges", width: 1, height: 1 }),
-      h("div", { class: "canvas-nodes", id: "canvas-nodes" })
+      h("div", { class: "canvas-nodes", id: "canvas-nodes" }),
+      svgNode("svg", { class: "canvas-guides", id: "canvas-guides", width: 1, height: 1 })
     ]),
     h("div", { class: "canvas-empty", id: "canvas-empty", hidden: true }, [emptyState({ title: t("Nothing on the canvas yet"), text: t("Write what to draw below, or upload images.") })]),
     h("div", { class: "canvas-tools top-left" }, [
@@ -116,7 +120,7 @@ function svgNode(tag, attributes = {}) {
 
 function renderPanel() {
   const data = board.data;
-  const signature = signatureOf({ brief: data.brief, styles: data.styles, threads: data.threads });
+  const signature = signatureOf({ purpose: data.purpose, brief: Boolean(data.brief.trim()), styles: data.styles, threads: data.threads });
   if (signature === board.panelSignature) return;
   board.panelSignature = signature;
   const project = data.name;
@@ -129,25 +133,37 @@ function renderPanel() {
     ]
   }));
 
-  const brief = data.brief.trim();
+  // A guide shows under the styles that build on it; one no style builds on yet is listed on its own.
+  const guides = new Set(data.styles.filter(style => style.guide).map(style => style.name));
+  const used = new Set(data.styles.flatMap(style => style.extends.filter(name => guides.has(name))));
+  const rows = data.styles.filter(style => !used.has(style.name));
   const threads = [...data.threads].sort((a, b) => b.updated.localeCompare(a.updated));
   fill($("board-panel"),
-    sectionTitle(t("Brief"), brief ? button(t("Change in conversation"), { small: true, variant: "ghost", iconName: "memo", onClick: talkAboutBrief }) : null),
-    brief ? h("div", { class: "panel-brief" }, [markdownView(brief)]) : h("div", { class: "panel-empty" }, [
-      h("p", { class: "muted panel-hint", text: t("No brief yet. Tell the agent what the project is for, and it writes the brief every style and image here reads.") }),
-      button(t("Write in conversation"), { small: true, iconName: "memo", onClick: talkAboutBrief })
-    ]),
-
-    sectionTitle(t("Styles"), data.styles.length ? String(data.styles.length) : null),
-    data.styles.length ? rowList(data.styles.map(style => listRow({
-      title: style.name,
-      detail: style.guide ? style.purpose || t("Lends its rules to the styles that build on it.") : style.missing ? blockedReason(style) : style.purpose || null,
-      onClick: () => { location.hash = hashes.style(project, style.name); },
-      aside: h("div", { class: "row" }, [
-        style.guide ? pill(t("Guide"), { small: true }) : style.missing ? pill(t("Cannot draw yet"), { small: true }) : null,
-        style.proposals ? pill(tn("{count} proposal", "{count} proposals", style.proposals), { tone: "accent", small: true }) : null
+    sectionTitle(t("Brief")),
+    data.brief.trim()
+      ? h("a", { class: "panel-brief", href: hashes.brief(project) }, [
+        h("p", { text: data.purpose || t("The brief has no purpose line yet.") }),
+        h("span", { class: "panel-link", text: t("Read the brief") })
       ])
-    }))) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
+      : h("div", { class: "panel-empty" }, [
+        h("p", { class: "muted panel-hint", text: t("No brief yet. Tell the agent what the project is for, and it writes the brief every style and image here reads.") }),
+        linkButton(t("Write the brief"), hashes.brief(project), { iconName: "memo" })
+      ]),
+
+    sectionTitle(t("Styles"), rows.length ? String(rows.length) : null),
+    rows.length ? rowList(rows.map(style => {
+      const lent = style.extends.filter(name => guides.has(name));
+      const row = listRow({
+        title: style.name,
+        detail: style.missing && style.missing !== "guide" ? blockedReason(style) : style.purpose || null,
+        onClick: () => { location.hash = hashes.style(project, style.name); },
+        aside: style.proposals ? pill(tn("{count} proposal", "{count} proposals", style.proposals), { tone: "accent", small: true }) : null
+      });
+      if (lent.length) row.querySelector(".row-text").append(h("span", { class: "row-links" }, lent.map(name => h("a", {
+        href: hashes.style(project, name), text: name, title: t("Its rules include {style}", { style: name }), onclick: event => event.stopPropagation()
+      }))));
+      return row;
+    })) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
     h("div", { class: "row" }, [button(t("New style"), { small: true, iconName: "plus", onClick: newStyle })]),
 
     sectionTitle(t("Threads"), drawableStyles().length ? button(t("New ideation"), { small: true, variant: "ghost", iconName: "plus", onClick: newIdeation }) : null),
@@ -163,30 +179,15 @@ function renderPanel() {
 
 const drawableStyles = () => board.data.styles.filter(style => style.missing == null);
 
-async function talkAboutBrief() {
-  try {
-    const made = await api("/api/threads", { project: board.project, kind: "project" });
-    location.hash = hashes.thread(board.project, made.thread);
-  } catch (error) { toast(error.message, "error"); }
-}
-
-async function newStyle() {
-  const kind = await ask({
-    title: t("New style"), confirm: t("Next"), input: null,
-    choices: [
-      { value: "style", title: t("Style"), detail: t("How every image drawn with it looks: the medium, line, color, light, and texture.") },
-      { value: "guide", title: t("Guide"), detail: t("Draws nothing itself. Lends rules such as brand colors to the styles that build on it.") }
-    ]
-  });
-  if (!kind) return;
-  const guide = kind === "guide";
+// Whether the new style draws or only lends its rules to others is worked out in its thread.
+function newStyle() {
   return askName({
-    title: guide ? t("New guide") : t("New style"),
-    description: guide ? t("A guide lends rules such as brand colors to the styles that build on it, and draws nothing itself.") : t("Find the style together, in conversation."),
+    title: t("New style"),
+    description: t("Find the style together, in conversation."),
     confirm: t("Create"),
     taken: t("A style with this name already exists."),
     submit: async name => {
-      const made = await api("/api/styles", { project: board.project, name, guide });
+      const made = await api("/api/styles", { project: board.project, name });
       location.hash = hashes.thread(board.project, made.thread);
     }
   });
@@ -259,10 +260,7 @@ function nodeCard(node) {
   const several = node.images.length > 1;
   const card = h("article", { class: "canvas-node", "data-id": node.id }, [
     h("header", { class: "node-head" }, nodeHead(node)),
-    from.length ? h("div", { class: "node-from" }, from.map(item => h("button", { class: "node-parent", type: "button", "data-path": item.path, title: parentTitle(item), onclick: () => showNode(item.node) }, [
-      h("img", { src: fileUrl(inProject(project, item.path)), alt: "", loading: "lazy" }),
-      h("span", { text: parentLabel(item) })
-    ]))) : null,
+    from.length ? h("div", { class: "node-from" }, from.map(item => parentChip(project, item))) : null,
     node.request ? h("p", { class: "node-request", text: node.request.replace(/\n\s*\n+/g, "\n") }) : null,
     node.images.length ? h("div", { class: `node-images${several ? " several" : ""}` }, node.images.map((image, index) => h("div", { class: "node-image", "data-path": image.path }, [
       imageFrame(inProject(project, image.path), {
@@ -285,11 +283,8 @@ function nodeCard(node) {
 const frameIndexOf = id => board.data.canvas.frames.findIndex(frame => frame.nodes.includes(id));
 
 function openNodeMenu(node, event) {
-  const grouping = board.selected.has(node.id) ? [...board.selected] : [node.id];
   openMenu({ x: event.clientX, y: event.clientY }, [
     node.thread ? { label: t("Open the thread"), onClick: () => { location.hash = hashes.thread(board.project, node.thread); } } : null,
-    { label: t("Group"), onClick: () => groupNodes(grouping) },
-    frameIndexOf(node.id) >= 0 ? { label: t("Remove from group"), onClick: () => ungroupNodes([node.id]) } : null,
     { label: t("Delete"), danger: true, onClick: () => deleteNode(node) }
   ]);
 }
@@ -340,7 +335,7 @@ function renderInspector() {
   const panel = $("board-inspector");
   if (!panel) return;
   const nodes = [...board.selected].map(nodeById).filter(Boolean);
-  const signature = signatureOf({ nodes, reviews: nodes.map(node => board.reviews.has(node.id)), frames: board.data.canvas.frames, agent: agentAttached() });
+  const signature = signatureOf({ nodes, frames: board.data.canvas.frames, agent: agentAttached() });
   if (signature === board.inspectorSignature) return;
   board.inspectorSignature = signature;
   panel.hidden = !nodes.length;
@@ -349,34 +344,28 @@ function renderInspector() {
 
 const inspectorSection = (title, ...children) => h("section", { class: "inspector-section" }, [h("h3", { text: title }), ...children]);
 
+const parentChip = (project, item) => h("button", { class: "node-parent", type: "button", "data-path": item.path, title: parentTitle(item), onclick: () => showNode(item.node) }, [
+  h("img", { src: fileUrl(inProject(project, item.path)), alt: "", loading: "lazy" }),
+  h("span", { text: parentLabel(item) })
+]);
+
+// How the node was made; what was asked and what came out are on its card.
 function nodeDetail(node) {
   const project = board.project;
-  const items = node.images.map(image => nodeImageItem(project, node, image, board.data.styles));
   const from = parentImages(node);
   const several = node.images.length > 1;
-  const notes = node.images.map((image, index) => image.description ? [several ? pad(index + 1) : null, image.description] : null).filter(Boolean);
-  const reviewed = node.images.some(image => image.review);
-  const open = board.reviews.has(node.id);
+  const numbered = (index, text) => h("p", { class: "inspector-text inspector-numbered" }, [several ? h("span", { class: "inspector-number", text: pad(index + 1) }) : null, h("span", { text })]);
+  const notes = node.images.map((image, index) => image.description ? numbered(index, image.description) : null).filter(Boolean);
+  const prompts = node.images.map((image, index) => image.prompt ? [several ? h("span", { class: "inspector-number", text: pad(index + 1) }) : null, h("pre", { class: "document", text: image.prompt })] : null).filter(Boolean);
   const attachments = node.kind === "upload" ? [] : node.attachments;
   return [
     h("header", { class: "node-head inspector-head" }, nodeHead(node, [tool("close", t("Close"), clearSelection, { quiet: true })])),
-    node.request ? inspectorSection(t("Request"), h("p", { class: "inspector-text", text: node.request })) : null,
-    from.length ? inspectorSection(t("Built from"), h("div", { class: "thumbs" }, from.map(item => thumb(inProject(project, item.path), { small: true, badge: parentLabel(item), title: parentTitle(item), onClick: () => showNode(item.node) })))) : null,
+    from.length ? inspectorSection(t("Built from"), h("div", { class: "node-from" }, from.map(item => parentChip(project, item)))) : null,
     attachments.length ? inspectorSection(t("Attachments"), h("div", { class: "thumbs" }, attachments.map((path, index, all) => thumb(inProject(project, path), {
       small: true, onClick: () => openLightbox(all.map(each => ({ path: inProject(project, each), info: [] })), index)
     })))) : null,
     node.status === "failed" ? notice(node.error || t("Nothing came out of this request."), { tone: "danger" }) : null,
-    node.note || notes.length ? inspectorSection(t("Agent's note"),
-      node.note ? h("p", { class: "inspector-text", text: node.note }) : null,
-      ...notes.map(([number, text]) => h("p", { class: "inspector-text inspector-numbered" }, [number ? h("span", { class: "inspector-number", text: number }) : null, h("span", { text })]))
-    ) : null,
-    reviewed ? h("section", { class: "inspector-section" }, [
-      button(open ? t("Hide review") : t("Show review"), { small: true, variant: "ghost", iconName: "eye", onClick: () => toggleReviews(node.id) }),
-      open ? h("div", { class: "inspector-reviews" }, node.images.map((image, index) => image.review ? h("div", { class: "inspector-numbered" }, [
-        several ? h("span", { class: "inspector-number", text: pad(index + 1) }) : null,
-        reviewLine(image.review)
-      ]) : null)) : null
-    ]) : null,
+    node.note || notes.length ? inspectorSection(t("Agent's note"), node.note ? h("p", { class: "inspector-text", text: node.note }) : null, ...notes) : null,
     node.images.length || node.model || node.tool ? inspectorSection(t("Made with"), specList([
       node.tool ? [t("Tool"), TOOL_NAMES[node.tool] || node.tool] : node.model ? [t("Model"), shortModel(node.model)] : null,
       node.style ? [t("Style"), node.revision ? t("{style} at revision {revision}", { style: node.style, revision: node.revision }) : node.style] : null,
@@ -385,8 +374,9 @@ function nodeDetail(node) {
     ]), node.references.length ? h("div", { class: "thumbs" }, node.references.map(item => thumb(item.path || item.object, {
       small: true, src: objectUrl(item.object), badge: ROLE_NAMES[item.role] || item.role, title: item.path || ""
     }))) : null, node.dropped.length ? h("p", { class: "muted inspector-text", text: `${t("References left out")}: ${node.dropped.map(item => `${item.reference} (${item.reason})`).join(", ")}` }) : null) : null,
-    node.images.some(image => image.prompt) ? h("div", { class: "row" }, [
-      button(t("Prompt"), { small: true, variant: "ghost", iconName: "text", onClick: () => openLightbox(items, 0) })
+    prompts.length ? h("details", { class: "inspector-section inspector-prompt" }, [
+      h("summary", {}, [h("span", { class: "disclosure-mark", html: icon("chevron") }), h("span", { text: t("Prompt") })]),
+      ...prompts.map(parts => h("div", { class: "inspector-numbered" }, parts))
     ]) : null,
     node.thread ? h("div", { class: "row" }, [linkButton(t("Open the thread"), hashes.thread(project, node.thread), { iconName: "open" })]) : null
   ];
@@ -399,18 +389,12 @@ function selectionDetail(nodes) {
       h("span", { class: "grow" }),
       tool("close", t("Close"), clearSelection, { quiet: true })
     ]),
-    h("p", { class: "muted inspector-text", text: t("Drag one of them to move them together, or group them.") }),
+    h("p", { class: "muted inspector-text", text: t("Drag one of them to move them together, or group them (⌘G).") }),
     h("div", { class: "row" }, [
       button(t("Group"), { small: true, iconName: "plus", onClick: () => groupNodes(nodes.map(node => node.id)) }),
       nodes.some(node => frameIndexOf(node.id) >= 0) ? button(t("Remove from group"), { small: true, variant: "ghost", onClick: () => ungroupNodes(nodes.map(node => node.id)) }) : null
     ])
   ];
-}
-
-function toggleReviews(id) {
-  if (board.reviews.has(id)) board.reviews.delete(id);
-  else board.reviews.add(id);
-  renderInspector();
 }
 
 // ---------- frames ----------
@@ -729,6 +713,10 @@ function boardKeys(event) {
     $("canvas-viewport").classList.toggle("panning", board.spaceHeld);
     if (board.spaceHeld) event.preventDefault();
   }
+  if (event.type === "keydown" && event.key === "g" && (event.metaKey || event.ctrlKey) && !typing && board.selected.size && $("modal").hidden) {
+    event.preventDefault();
+    groupNodes([...board.selected]);
+  }
   if (event.type === "keydown" && event.key === "Escape" && !typing && (board.picked.size || board.selected.size) && $("modal").hidden && $("lightbox").hidden && $("menu").hidden) clearSelection();
 }
 
@@ -775,8 +763,10 @@ function bindViewport(viewport) {
         else viewport.classList.add("dragging");
       }
       if (moving.length) {
+        const snap = pointer.metaKey ? { x: 0, y: 0, lines: [] } : snapping(moving, start.at, dx / board.view.zoom, dy / board.view.zoom);
+        drawGuides(snap.lines);
         for (const id of moving) {
-          board.positions[id] = [start.at[id][0] + dx / board.view.zoom, start.at[id][1] + dy / board.view.zoom];
+          board.positions[id] = [start.at[id][0] + dx / board.view.zoom + snap.x, start.at[id][1] + dy / board.view.zoom + snap.y];
           // A poll may rebuild a card while it is held; the one on the canvas now is moved.
           const held = board.cards.get(id);
           if (!held) continue;
@@ -797,6 +787,7 @@ function bindViewport(viewport) {
       moving.forEach(id => { const held = board.cards.get(id); if (held) held.element.classList.remove("dragging"); });
       viewport.classList.remove("dragging");
       board.dragging = null;
+      drawGuides([]);
       if (moved && moving.length) return placeByHand();
       if (moved || ended.type === "pointercancel" || event.button !== 0) return;
       const image = event.target.closest(".node-image");
@@ -830,6 +821,44 @@ function bindViewport(viewport) {
     if (event.target.closest(".dock")) addAttachments(files);
     else uploadNodes(files);
   });
+}
+
+// Where the moving cards, shifted by dx and dy, come within SNAP of another card's left edge, center, or right edge
+// (and top, middle, or bottom): the nudge that lines them up on each axis, and the lines to show for it.
+function snapping(moving, from, dx, dy) {
+  const reach = SNAP / board.view.zoom;
+  const box = moving.map(id => {
+    const { width, height } = sizeOf(id);
+    return { x: from[id][0] + dx, y: from[id][1] + dy, right: from[id][0] + dx + width, bottom: from[id][1] + dy + height };
+  }).reduce((a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) }));
+  const others = Object.keys(board.positions).filter(id => !moving.includes(id) && board.cards.has(id)).map(rectOf);
+  const axis = (low, high, lowOf, highOf) => {
+    const mine = [low(box), (low(box) + high(box)) / 2, high(box)];
+    let best = null;
+    for (const rect of others) {
+      for (const theirs of [low(rect), (low(rect) + high(rect)) / 2, high(rect)]) {
+        for (const at of mine) {
+          const nudge = theirs - at;
+          if (Math.abs(nudge) <= reach && (!best || Math.abs(nudge) < Math.abs(best.nudge))) best = { nudge, at: theirs };
+        }
+      }
+    }
+    if (!best) return { nudge: 0, lines: [] };
+    // One line per aligned value, spanning the moved box and every card that shares it.
+    const sharing = others.filter(rect => [low(rect), (low(rect) + high(rect)) / 2, high(rect)].some(value => Math.abs(value - best.at) < 0.5));
+    return { nudge: best.nudge, lines: [{ at: best.at, from: Math.min(lowOf(box), ...sharing.map(lowOf)), to: Math.max(highOf(box), ...sharing.map(highOf)) }] };
+  };
+  const x = axis(rect => rect.x, rect => rect.right, rect => rect.y, rect => rect.bottom);
+  const y = axis(rect => rect.y, rect => rect.bottom, rect => rect.x, rect => rect.right);
+  return {
+    x: x.nudge, y: y.nudge,
+    lines: [...x.lines.map(line => [line.at, line.from, line.at, line.to]), ...y.lines.map(line => [line.from, line.at, line.to, line.at])]
+  };
+}
+
+function drawGuides(lines) {
+  const layer = $("canvas-guides");
+  if (layer) layer.replaceChildren(...lines.map(([x1, y1, x2, y2]) => svgNode("line", { class: "guide", x1, y1, x2, y2 })));
 }
 
 // Once the user places a card by hand, every card keeps the place it has now, so the layout no longer moves under them.

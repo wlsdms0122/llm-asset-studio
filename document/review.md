@@ -22,7 +22,7 @@ How the agent reviews generated images before the user sees them. Reviewing look
 - `drift`: the style does not hold. Name which property and how.
 - `leak`: something came over from a reference. Name the reference and what came over ("leak: 02.jpg, the navy background and the mug's handle").
 
-A verdict is written as its keyword, a colon, and one line in the user's language ("drift: 그림자가 회색이에요, 스타일은 파란 보라"), since the user reads it on the page. The keyword stays in English; the page translates it.
+A verdict is written as its keyword, a colon, and one line ("drift: the shadows are gray, the style's are blue violet").
 
 Rank a batch from closest to the style to farthest. Ranking is the reliable signal; a verdict is a claim to be checked against the user's picks.
 
@@ -39,4 +39,4 @@ Oversaturated color, plastic or waxy surfaces, flat even lighting with no shadow
 
 ## Record
 
-Record every verdict with the image it is about (`node.py publish --review` or `probe.py publish --review`, one per image). A node shows its reviews only after the user has built on one of its images or opened them, so they do not steer which image the user takes; in a conversation report, give them after the user's answer. A probe run shows its reviews, since its images are compared, not picked. A report that says "all passed" without a line per image has not been judged. The style page counts each style's leaks. Agreement between these verdicts and the user's choices decides how much of the user review can be skipped later.
+Record every verdict with the image it is about (`node.py publish --review` or `probe.py publish --review`, one per image). Reviews are the agent's record and the studio does not show them; the user sees what follows from them (an image fixed or redrawn, a proposal). In a conversation report, give them after the user's answer, so they do not steer which image the user takes. A report that says "all passed" without a line per image has not been judged. Agreement between these verdicts and the user's choices decides how much of the user review can be skipped later.

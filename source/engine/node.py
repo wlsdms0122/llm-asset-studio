@@ -226,12 +226,6 @@ def views(project):
     return [node.view() for node in project.nodes()]
 
 
-def leaks(project, style):
-    """How many reviewed images of a style the reviews found carrying something over from a reference."""
-    reviews = [review for node in project.nodes() if node.style == style for review in ((node.result() or {}).get("reviews") or {}).values()]
-    return {"reviewed": len(reviews), "leaked": sum(1 for review in reviews if review.lower().startswith("leak"))}
-
-
 def run_in_background(node):
     threading.Thread(target=node.run_tool, daemon=True).start()
 
@@ -279,7 +273,7 @@ def parse_arguments():
     publishing.add_argument("node", help="projects/<project>/nodes/<id>")
     publishing.add_argument("--note", default="", help="the agent's message on the node, in the user's language")
     publishing.add_argument("--describe", action="append", default=[], help="one line per image, in order: what to say about it")
-    publishing.add_argument("--review", action="append", default=[], help="one verdict per image, in order (document/review.md); hidden until the user acts on the node")
+    publishing.add_argument("--review", action="append", default=[], help="one verdict per image, in order (document/review.md)")
     publishing.add_argument("--drop", action="append", default=[], help="REFERENCE=WHY: a style reference left out of this generation and why, repeatable")
     publishing.add_argument("files", nargs="*", help="the images in display order; defaults to every image drawn into the node")
     for command in ("show", "delete"):
