@@ -6,17 +6,21 @@ version = "1.0.0"
 [package]
 name = "asset-studio"
 version = "0.1.0"
-description = "Makes image styles with the user in conversation and generates images in them through OpenRouter, with a web studio over the same records"
+description = "Makes consistent images for a project through styles that keep improving: styles with revisions, probes, and proposals, images as nodes on a canvas, generated through OpenRouter, with a web studio over the same records"
 requires = ["python3", "swift"]
 
 [command]
 # Every command runs inside the workspace, ~/.config/asset-studio or $ASSET_STUDIO_HOME (see source/engine/workspace.py).
 studio = "python3 source/engine/server.py"
-session = "python3 source/engine/session.py"
-generate = "python3 source/engine/generate.py"
+watch = "python3 source/engine/watch.py"
+project = "python3 source/engine/project.py"
 style = "python3 source/engine/style.py"
+proposal = "python3 source/engine/proposal.py"
+probe = "python3 source/engine/probe.py"
+node = "python3 source/engine/node.py"
+thread = "python3 source/engine/thread.py"
+generate = "python3 source/engine/generate.py"
 sheet = "python3 source/engine/sheet.py"
 models = "python3 source/engine/catalog.py"
-cutout = "python3 source/engine/cutout.py"
 key = "python3 source/engine/workspace.py key"
 verify = "python3 source/verify.py"

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Run the engine and the studio server end to end in a throwaway workspace, generating nothing and spending nothing.
 
-Checks that every text on screen has its Korean, then makes a style through its whole life (make session, discover, sample, confirm), opens generate and model
-sessions, removes a background, talks a generate session into a brief, curates references, switches and removes models, renames and deletes, asks the server for
-every page's state, and stores a key. Exits 0 when everything holds, 1 with the failed checks otherwise.
+Checks that every text on screen has its Korean, then makes a project and a style through its whole life (the style
+thread, probes drawn from the words alone, references picked from them and annotated, generation nodes and a refine,
+a proposal tried with probes and accepted, a stale proposal refused, a revision restored), extends a guide, runs a
+tool node, turns an ideation brief into a node, renames, copies, and deletes, asks the server for every page's state
+and writes through it, and stores a key. Image generation is stood in for by writing images and their call records
+where generate.py would. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
 
 import base64
@@ -20,8 +23,8 @@ import time
 import urllib.error
 import urllib.request
 import zlib
-from urllib.parse import quote
 from pathlib import Path
+from urllib.parse import quote
 
 ENGINE = Path(__file__).resolve().parent / "engine"
 failures = []
@@ -33,20 +36,22 @@ def check(name, ok):
         failures.append(name)
 
 
-def png(path, color):
+def png(path, color, size=8):
     """A small solid PNG, so the run needs no image library."""
-    width = height = 8
-    raw = b"".join(b"\x00" + bytes(color) * width for _ in range(height))
-    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    raw = b"".join(b"\x00" + bytes(color) * size for _ in range(size))
+    path.write_bytes(encode(raw, size))
 
 
 def disc(path):
     """A red disc on a light background: a subject Vision can lift."""
     size = 128
     rows = b"".join(b"\x00" + b"".join(bytes((220, 60, 60) if (x - 64) ** 2 + (y - 64) ** 2 < 35 ** 2 else (245, 245, 245)) for x in range(size)) for y in range(size))
+    path.write_bytes(encode(rows, size))
+
+
+def encode(rows, size):
     chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
 
 def inside(workspace):
@@ -60,115 +65,148 @@ def engine(workspace, *arguments, ok=True):
     return result
 
 
-def ledger_entry(workspace, style, session, tag, outputs, model="test/model"):
-    """What generate.py records after a call, written directly since the run makes no network calls."""
-    entry = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "tag": tag, "session": session, "model": model, "request": f"{tag} request", "prompt": f"{tag} prompt", "status": "ok", "outputs": outputs, "cost": 0.0}
-    with (workspace / "styles" / style / "ledger.jsonl").open("a") as file:
-        file.write(json.dumps(entry) + "\n")
+def out(workspace, *arguments):
+    return engine(workspace, *arguments).stdout.strip()
 
 
-def draw(workspace, style, session, tag, colors, model="test/model"):
-    round_directory = Path(engine(workspace, "session.py", "next", f"sessions/{style}/{session}").stdout.strip())
-    paths = []
-    for index, color in enumerate(colors):
-        path = round_directory / f"{tag}-{index}-{len(list(round_directory.iterdir()))}.png"
+def draw(workspace, folder, colors, request="a request", model="test/model", into=""):
+    """What generate.py leaves: images in the folder and a call record beside them."""
+    folder = workspace / folder
+    target = folder / into
+    target.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for color in colors:
+        path = target / f"{len(list(target.glob('*.png')))}-{'-'.join(map(str, color))}.png"
         png(path, color)
-        paths.append(path.relative_to(workspace).as_posix())
-    ledger_entry(workspace, style, session, tag, paths, model)
-    return round_directory
+        outputs.append(path.relative_to(folder).as_posix())
+    call = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "model": model, "revision": None, "request": request, "prompt": f"prompt for {request}", "references": [], "status": "ok", "outputs": outputs, "cost": 0.01 * len(outputs)}
+    with (folder / "calls.jsonl").open("a") as file:
+        file.write(json.dumps(call) + "\n")
+    return [str(folder / output) for output in outputs]
 
 
 def lifecycle(workspace):
-    engine(workspace, "session.py", "new", "demo")
-    make = next((workspace / "sessions" / "demo").iterdir()).name
-    session = f"sessions/demo/{make}"
-    engine(workspace, "session.py", "answer", session, "--comment", "warm")
-    check("watch hands over a session the user answered", engine(workspace, "session.py", "watch").stdout.split() == [session])
-    (workspace / "styles/demo/style.md").write_text("# demo\n\nA test style.\n")
-    round_directory = draw(workspace, "demo", make, "discover", [(200, 40, 40), (40, 40, 200)])
-    engine(workspace, "session.py", "publish", str(round_directory), "--kind", "discover", "--describe", "one", "--describe", "two")
-    engine(workspace, "session.py", "answer", session, "--picked", "1", "--note", "2=too dark", "--decision", "sample")
-    (workspace / "styles/demo/prompting").mkdir()
-    (workspace / "styles/demo/prompting/test--model.md").write_text("# demo on test\n")
-    (workspace / "styles/demo/model").write_text("test/model\n")
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", make, "sample", [(40, 200, 40)])), "--kind", "sample")
-    engine(workspace, "session.py", "answer", session, "--decision", "confirm")
-    engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "confirm")
-    engine(workspace, "session.py", "answer", session, "--picked", "1", "--decision", "done")
-    engine(workspace, "session.py", "confirm", session)
-    check("confirm makes references and ends the make session", len(list((workspace / "styles/demo/references").iterdir())) == 1 and not (workspace / "sessions/demo").exists())
+    out(workspace, "project.py", "new", "demo")
+    style_path, thread_path = out(workspace, "style.py", "new", "demo", "icon").splitlines()
+    check("a new style opens its thread", style_path == "projects/demo/styles/icon" and thread_path == "projects/demo/threads/t1")
+    check("a new thread waits for the user", out(workspace, "watch.py", "--once") == "")
+    engine(workspace, "thread.py", "answer", thread_path, "--comment", "flat, warm")
+    check("watch hands over a thread the user answered", out(workspace, "watch.py", "--once").split() == [thread_path])
+    check("watch records that an agent looked", json.loads((workspace / "agent.json").read_text())["seen"] > 0)
 
-    generate = Path(engine(workspace, "session.py", "open", "styles/demo", "generate").stdout.strip()).name
-    engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--request", "a cup", "--decision", "new")
-    round_directory = draw(workspace, "demo", generate, "generate", [(220, 220, 40)])
-    engine(workspace, "session.py", "publish", str(round_directory), "--kind", "generate")
-    archive = (workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()
-    check("generate images are archived", any(json.loads(line)["kind"] == "generate" for line in archive))
-    check("a board does not go to ideation", engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--comment", "talk", "--decision", "discover", ok=False).returncode != 0)
-    engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--picked", "1", "--request", "a bigger cup", "--decision", "refine")
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", generate, "generate", [(200, 200, 60)])), "--kind", "generate")
-    board = json.loads(engine(workspace, "session.py", "show", f"sessions/demo/{generate}").stdout)["candidates"]
-    check("a refined image names the attempt it was drawn from", board[0]["refined_from"] is None and board[1]["refined_from"] == board[0]["path"])
-    engine(workspace, "session.py", "rename", f"sessions/demo/{generate}", "  the  cup ")
-    check("a session keeps the name the user gave it", json.loads((workspace / f"sessions/demo/{generate}/session.json").read_text())["name"] == "the cup")
+    style = workspace / style_path
+    (style / "style.md").write_text("# icon\n\nA test style.\n\n## Color\n\n- warm colors\n\n## Never\n\n- gradients\n")
+    (style / "style.json").write_text(json.dumps({"model": "test/model", "extends": [], "guide": False}))
+    (style / "prompting").mkdir()
+    (style / "prompting/test--model.md").write_text("# icon on test\n")
+    (style / "probes.md").write_text("- a mug\n- a chair\n")
+    check("the agent's edits become a revision", out(workspace, "style.py", "revise", style_path, "--summary", "first words") == "1")
+    candidates = draw(workspace, f"{thread_path}/002", [(200, 40, 40), (40, 40, 200)], model="draft/model")
+    engine(workspace, "thread.py", "publish", f"{thread_path}/002", "--note", "which?", "--describe", "red", "--describe", "blue")
+    shown = json.loads(out(workspace, "thread.py", "show", thread_path))
+    check("a round shows its candidates with the model that drew them", [item["model"] for item in shown["rounds"][-1]["candidates"]] == ["draft/model", "draft/model"])
+
+    blocked = engine(workspace, "node.py", "add", "demo", "--style", "icon", "--request", "a cup", ok=False)
+    check("a style without references cannot draw", blocked.returncode != 0 and "references" in blocked.stderr)
+
+    run = out(workspace, "probe.py", "request", style_path)
+    check("watch hands over a probe run", run in out(workspace, "watch.py", "--once").split())
+    images = draw(workspace, run, [(220, 120, 40)], "a mug") + draw(workspace, run, [(200, 140, 60)], "a chair")
+    check("a run takes one image per request", engine(workspace, "probe.py", "publish", run, images[0], ok=False).returncode != 0)
+    engine(workspace, "probe.py", "publish", run, *images, "--note", "first probes")
+    check("a run shows the revision it drew", json.loads(out(workspace, "probe.py", "show", run))["revision"] == 1)
+
+    engine(workspace, "style.py", "reference-add", style_path, images[0])
+    engine(workspace, "style.py", "reference-add", style_path, images[0])
+    engine(workspace, "style.py", "reference-add", style_path, images[1])
+    check("a reference is added once and the user's change is a revision", len(list((style / "references").glob("*.png"))) == 2 and len((style / "revisions.jsonl").read_text().splitlines()) == 3)
+    check("watch hands over references without annotations", style_path in out(workspace, "watch.py", "--once").split())
+    for name in ("01.png", "02.png"):
+        engine(workspace, "style.py", "annotate", f"{style_path}/references/{name}", "--role", "style", "--shows", "a mug", "--take", "the rendering", "--ignore", "the subject")
+    engine(workspace, "style.py", "set-check", style_path)
+    check("annotated and checked references need nothing", style_path not in out(workspace, "watch.py", "--once").split())
+
+    node = out(workspace, "node.py", "add", "demo", "--style", "icon", "--request", "a cup")
+    check("watch hands over a generation node", node in out(workspace, "watch.py", "--once").split())
+    drawn = draw(workspace, node, [(220, 220, 40), (210, 210, 50)], "a cup")
+    engine(workspace, "node.py", "publish", node, "--note", "two cups", "--review", "pass: holds", "--review", "leak: copied the mug handle", "--drop", "02.png=same subject")
+    view = json.loads(out(workspace, "node.py", "show", node))
+    check("a node keeps its images, revision, and dropped references", len(view["images"]) == 2 and view["revision"] == 5 and view["dropped"] == [{"reference": "02.png", "reason": "same subject"}])
+    refine = out(workspace, "node.py", "add", "demo", "--style", "icon", "--request", "a bigger cup", "--parent", drawn[0])
+    check("a refine names the image it builds on", json.loads(out(workspace, "node.py", "show", refine))["parents"] == [f"nodes/n1/{Path(drawn[0]).name}"])
+    check("a parent must be an image of the project", engine(workspace, "node.py", "add", "demo", "--style", "icon", "--request", "x", "--parent", f"{style_path}/references/01.png", ok=False).returncode != 0)
+
+    (workspace / "proposed.md").write_text((style / "style.md").read_text().replace("warm colors", "warm colors, at most three"))
+    proposal = out(workspace, "proposal.py", "propose", style_path, "--summary", "three colors", "--reason", "too busy", "--source", "n1", "--set", f"style.md={workspace / 'proposed.md'}")
+    check("a proposal shows its diff", "+- warm colors, at most three" in out(workspace, "proposal.py", "show", style_path, proposal))
+    proposed_run = out(workspace, "probe.py", "request", style_path, "--proposal", proposal)
+    engine(workspace, "probe.py", "publish", proposed_run, *draw(workspace, proposed_run, [(230, 120, 40)], "a mug"), *draw(workspace, proposed_run, [(230, 140, 60)], "a chair"))
+    accepted = out(workspace, "proposal.py", "accept", style_path, proposal)
+    check("an accepted proposal is the next revision, and its probes show it", "at most three" in (style / "style.md").read_text() and json.loads(out(workspace, "probe.py", "show", proposed_run))["revision"] == int(accepted))
+
+    (workspace / "late.md").write_text("# icon\n\nlate\n")
+    late = out(workspace, "proposal.py", "propose", style_path, "--summary", "late", "--reason", "r", "--set", f"style.md={workspace / 'late.md'}")
+    (style / "style.md").write_text((style / "style.md").read_text() + "\n## Mood\n\n- calm\n")
+    engine(workspace, "style.py", "revise", style_path, "--summary", "mood")
+    check("a proposal written before the style changed is refused", engine(workspace, "proposal.py", "accept", style_path, late, ok=False).returncode != 0)
+    restored = out(workspace, "style.py", "restore", style_path, "1")
+    check("restoring a revision brings its files back as a new revision", "at most three" not in (style / "style.md").read_text() and not list((style / "references").glob("*.png")) and int(restored) > int(accepted))
+    engine(workspace, "style.py", "restore", style_path, str(int(restored) - 1))
+
+    out(workspace, "style.py", "new", "demo", "palette", "--guide")
+    guide = workspace / "projects/demo/styles/palette"
+    (guide / "style.md").write_text("# palette\n\n## Color\n\n- coral, yellow, sky\n\n## Never\n\n- gray\n")
+    engine(workspace, "style.py", "revise", "projects/demo/styles/palette", "--summary", "colors")
+    out(workspace, "style.py", "new", "demo", "branded")
+    branded = workspace / "projects/demo/styles/branded"
+    (branded / "style.md").write_text("# branded\n\n## Mood\n\n- calm\n")
+    engine(workspace, "style.py", "extends", "projects/demo/styles/branded", "icon", "palette")
+    effective = out(workspace, "style.py", "effective", "projects/demo/styles/branded")
+    check("an extending style takes later sections over earlier ones and adds up Never", "coral, yellow, sky" in effective and "warm colors" not in effective and "- gray" in effective and "- gradients" in effective and "- calm" in effective)
+    check("a guide draws nothing", engine(workspace, "probe.py", "request", "projects/demo/styles/palette", ok=False).returncode != 0)
+    check("an extend that loops is refused", engine(workspace, "style.py", "extends", style_path, "branded", ok=False).returncode != 0)
+    (guide / "style.md").write_text((guide / "style.md").read_text().replace("sky", "mint"))
+    sys.path.insert(0, str(ENGINE))
+    os.environ["ASSET_STUDIO_HOME"] = str(workspace)
+    import workspace as home
+    from project import Project
+    home.HOME, home.PROJECTS, home.OBJECTS = workspace, workspace / "projects", workspace / "objects"
+    check("a changed base marks the styles that extend it", Project(workspace / "projects/demo").style("branded").stale_bases() == ["palette"])
+    materialized = workspace / "materialized"
+    engine(workspace, "style.py", "materialize", "projects/demo/styles/branded", str(materialized))
+    check("materialize writes the effective style and the references of the base it draws with", "mint" in (materialized / "style.md").read_text() and len(list((materialized / "references").glob("*.png"))) == 2)
+    check("deleting an extended style is refused", engine(workspace, "style.py", "delete", "projects/demo/styles/palette", ok=False).returncode != 0)
 
     if sys.platform == "darwin" and shutil.which("swift"):
-        subject = workspace / "subject.png"
+        subject = workspace / "projects/demo/nodes/n1/subject.png"
         disc(subject)
-        result = engine(workspace, "cutout.py", f"sessions/demo/{generate}", str(subject), "--request", "no background", ok=False)
-        outputs = json.loads(result.stdout or "{}").get("outputs") or []
+        tool = out(workspace, "node.py", "add", "demo", "--tool", "cutout", "--parent", str(subject))
+        result = json.loads((workspace / tool / "result.json").read_text())
         # PNG color type 6 is RGBA.
-        check("cutout writes the subject into the next round with transparency", result.returncode == 0 and len(outputs) == 1 and (workspace / outputs[0]).read_bytes()[25] == 6)
-        if outputs:
-            engine(workspace, "session.py", "publish", str((workspace / outputs[0]).parent), "--kind", "generate")
-            check("a cutout is archived with its tool", json.loads((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()[-1]).get("tool") == "cutout")
+        check("a cutout node writes the subject with transparency", len(result["images"]) == 1 and (workspace / tool / result["images"][0]).read_bytes()[25] == 6)
     else:
         print("skip cutout, which needs macOS and Swift")
 
-    image = next(round_directory.glob("*.png"))
-    engine(workspace, "style.py", "reference-add", "styles/demo", str(image))
-    engine(workspace, "style.py", "reference-add", "styles/demo", str(image))
-    check("a reference is added once", len(list((workspace / "styles/demo/references").iterdir())) == 2)
-    engine(workspace, "style.py", "reference-remove", "styles/demo", "02.png")
-    check("a reference is removed", len(list((workspace / "styles/demo/references").iterdir())) == 1)
+    talk = out(workspace, "thread.py", "open", style_path, "ideation", "--message", "an icon, no idea")
+    check("ideation starts with the user's words", talk in out(workspace, "watch.py", "--once").split())
+    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", talk), "--note", "a sun?")
+    check("drawing waits for a brief", engine(workspace, "thread.py", "answer", talk, "--decision", "generate", ok=False).returncode != 0)
+    engine(workspace, "thread.py", "answer", talk, "--comment", "the sun")
+    (workspace / talk / "brief.md").write_text("# A sun icon\n\nCentered.\n")
+    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", talk), "--note", "brief written")
+    answer = json.loads(out(workspace, "thread.py", "answer", talk, "--decision", "generate"))
+    made = json.loads(out(workspace, "node.py", "show", f"projects/demo/nodes/{answer['node']}"))
+    check("an ideation brief becomes a generation node", made["request"].startswith("A sun icon") and made["thread"] == Path(talk).name)
 
-    model = Path(engine(workspace, "session.py", "open", "styles/demo", "model", "--model", "other/model").stdout.strip())
-    check("a second session for the same model is refused", engine(workspace, "session.py", "open", "styles/demo", "model", "--model", "other/model", ok=False).returncode != 0)
-    (model / "prompting.md").write_text("# demo on other\n")
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", model.name, "model", [(90, 90, 90)], "other/model")), "--kind", "model")
-    engine(workspace, "session.py", "answer", f"sessions/demo/{model.name}", "--decision", "done")
-    engine(workspace, "session.py", "add-model", f"sessions/demo/{model.name}")
-    check("add-model adds the prompting file", (workspace / "styles/demo/prompting/other--model.md").exists())
-    check("removing the model in use is refused", engine(workspace, "style.py", "model-remove", "styles/demo", "test/model", ok=False).returncode != 0)
-    engine(workspace, "style.py", "use", "styles/demo", "other/model")
-    engine(workspace, "style.py", "model-remove", "styles/demo", "test/model")
-    check("a model not in use is removed", not (workspace / "styles/demo/prompting/test--model.md").exists())
-    image_talk(workspace)
-    return generate
-
-
-def image_talk(workspace):
-    """An ideation session: the agent works out the image in conversation, writes brief.md, and draws it there with the style."""
-    talk = Path(engine(workspace, "session.py", "open", "styles/demo", "ideation").stdout.strip())
-    session = f"sessions/demo/{talk.name}"
-    archived = len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines())
-    engine(workspace, "session.py", "answer", session, "--comment", "an icon, no idea what to draw")
-    round_directory = draw(workspace, "demo", talk.name, "discover", [(250, 200, 0), (0, 120, 250)])
-    engine(workspace, "session.py", "publish", str(round_directory), "--kind", "discover", "--note", "which idea?", "--describe", "a sun", "--describe", "a drop")
-    check("talk candidates are not archived", len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()) == archived)
-    check("ideation does not go to sample", engine(workspace, "session.py", "answer", session, "--decision", "sample", ok=False).returncode != 0)
-    check("drawing waits for a brief", engine(workspace, "session.py", "answer", session, "--picked", "1", "--decision", "generate", ok=False).returncode != 0)
-    engine(workspace, "session.py", "answer", session, "--picked", "1", "--comment", "the sun")
-    (talk / "brief.md").write_text("# A sun icon\n\nUse: an app icon.\n")
-    engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "discover", "--note", "a sun, centered")
-    check("ideation holds no board", engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "generate", ok=False).returncode != 0)
-    engine(workspace, "session.py", "answer", session, "--decision", "generate")
-    archived = len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines())
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "discover", [(250, 220, 0)], "other/model")), "--kind", "discover", "--note", "drawn from the brief")
-    drawn = json.loads(engine(workspace, "session.py", "show", session).stdout)
-    check("ideation draws from the brief in the conversation", drawn["kind"] == "discover" and drawn["brief"].startswith("# A sun icon") and len(drawn["candidates"]) == 1)
-    check("a talk candidate drawn with the style is archived", len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()) == archived + 1)
-    check("the talk keeps every turn", [turn["kind"] for turn in drawn["thread"]] == ["discover"] * 4 and drawn["thread"][0]["message"])
+    renamed = out(workspace, "style.py", "rename", style_path, "glyph")
+    check("renaming a style rewrites the records that name it", renamed == "projects/demo/styles/glyph" and json.loads((workspace / node / "node.json").read_text())["style"] == "glyph" and json.loads((workspace / thread_path / "thread.json").read_text())["style"] == "glyph")
+    out(workspace, "project.py", "new", "other")
+    copied = out(workspace, "style.py", "new", "other", "glyph", "--from", renamed).splitlines()[0]
+    first = json.loads((workspace / copied / "revisions.jsonl").read_text().splitlines()[0])
+    check("a copied style says where it came from", first["summary"].startswith("copied from demo/glyph") and json.loads((workspace / copied / "style.json").read_text())["extends"] == [])
+    engine(workspace, "project.py", "subject-add", "demo", drawn[0])
+    check("watch hands over a subject without its annotation", "projects/demo/subjects" in out(workspace, "watch.py", "--once").split())
+    return node
 
 
 def key(workspace):
@@ -178,7 +216,7 @@ def key(workspace):
     check("the key is not printed", "sk-test" not in stored.stdout + stored.stderr)
 
 
-def server(workspace, generate):
+def server(workspace, node):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -207,30 +245,40 @@ def server(workspace, generate):
             except urllib.error.HTTPError as error:
                 return error.code, json.loads(error.read() or b"{}")
 
-        for page in ("/", "/ui.js", "/ui.css", "/app.js", "/app.css"):
+        state = lambda path: json.loads(get(path)[1])
+        for page in ("/", "/ui.js", "/ui.css", "/app.js", "/app.css", "/canvas.js", "/i18n.js"):
             check(f"serves {page}", get(page)[0] == 200)
-        status, body = get("/api/styles")
-        check("lists styles", status == 200 and [style["name"] for style in json.loads(body)["styles"]] == ["demo"])
-        status, body = get(f"/api/state?style=demo&session={generate}")
-        check("a session's state", status == 200 and json.loads(body)["view"]["kind"] == "generate")
+        listed = state("/api/projects")
+        check("lists projects with whether an agent is attached", [project["name"] for project in listed["projects"]] == ["demo", "other"] and listed["agent"]["seen"] is not None)
+        project = state("/api/project?project=demo")
+        check("a project's canvas state", {style["name"] for style in project["styles"]} == {"glyph", "palette", "branded"} and any(item["id"] == "n1" for item in project["nodes"]))
+        built_on = next(item for item in project["nodes"] if item["id"] == "n1")
+        check("a node built on shows its reviews", built_on["images"][0]["review"] == "pass: holds")
+        style = state("/api/style?project=demo&style=glyph")
+        check("a style's page state", state("/api/style?project=demo&style=branded")["extends"] == ["glyph", "palette"] and style["leaks"] == {"reviewed": 2, "leaked": 1} and style["proposals"][0]["files"][0]["diff"])
+        reference = next(item["object"] for item in state("/api/style?project=demo&style=branded")["drawn_with"])
+        check("serves a reference by its object", get(f"/object/{reference}")[0] == 200)
+        check("an earlier revision", "warm colors" in state("/api/revision?project=demo&style=glyph&revision=1")["spec"])
+        check("a thread's state", state("/api/thread?project=demo&thread=t1")["rounds"][0]["note"])
         check("the archive", get("/api/archive")[0] == 200)
-        check("a foreign host is refused", get("/api/styles", {"Host": "example.com"})[0] == 403)
-        check("a plain text post is refused", post("/api/styles/delete", {"style": "demo"}, "text/plain")[0] == 415)
-        status, body = post("/api/sessions", {"style": "demo", "kind": "generate"})
+        check("a foreign host is refused", get("/api/projects", {"Host": "example.com"})[0] == 403)
+        check("a plain text post is refused", post("/api/projects/delete", {"project": "demo"}, "text/plain")[0] == 415)
         png(workspace / "upload.png", (10, 200, 10))
-        status_attached, attached = post("/api/attach", {"style": "demo", "session": body["session"], "name": "스크린샷 2026-10-22 오전 1.02.03.png", "data": base64.b64encode((workspace / "upload.png").read_bytes()).decode()})
-        check("an image with a Korean name is attached as a png", status_attached == 200 and attached["path"].endswith(".png"))
-        check("opens a generate session", status == 200 and (workspace / "sessions/demo" / body["session"]).is_dir())
-        status, opened = post("/api/sessions", {"style": "demo", "kind": "ideation"})
-        state = json.loads(get(f"/api/state?style=demo&session={opened.get('session')}")[1])
-        check("opens an ideation session", status == 200 and state["view"]["kind"] == "discover" and state["session"]["kind"] == "ideation")
-        check("renames a session", post("/api/sessions/rename", {"style": "demo", "session": body["session"], "name": "mugs"})[0] == 200 and next(session for session in json.loads(get("/api/state?style=demo")[1])["sessions"] if session["id"] == body["session"])["title"] == "mugs")
-        check("an empty session name is refused", post("/api/sessions/rename", {"style": "demo", "session": body["session"], "name": " "})[0] == 400)
-        check("deletes a session", post("/api/sessions/delete", {"style": "demo", "session": body["session"]})[0] == 200)
-        check("a name with capitals is refused", post("/api/styles/rename", {"style": "demo", "name": "Demo"})[0] == 400)
-        check("renames a style, to a Korean name", post("/api/styles/rename", {"style": "demo", "name": "데모-둘"})[0] == 200 and (workspace / "styles/데모-둘/style.md").read_text().startswith("# 데모-둘"))
-        check("a Korean-named style's state", get(f"/api/state?style={quote('데모-둘')}")[0] == 200)
-        check("deletes a style", post("/api/styles/delete", {"style": "데모-둘"})[0] == 200 and not (workspace / "styles/데모-둘").exists() and not (workspace / "sessions/데모-둘").exists())
+        image = base64.b64encode((workspace / "upload.png").read_bytes()).decode()
+        status, made = post("/api/nodes", {"project": "demo", "style": "glyph", "request": "a lamp", "attachments": [{"name": "스크린샷 2026-10-22 오전 1.02.03.png", "data": image}]})
+        check("asks for a generation with an attachment named in Korean", status == 200 and next((workspace / "projects/demo/nodes" / made["node"] / "attachments").iterdir()).suffix == ".png")
+        status, uploaded = post("/api/nodes", {"project": "demo", "kind": "upload", "attachments": [{"name": "a.png", "data": image}]})
+        check("an upload is a node with its image", status == 200 and state("/api/project?project=demo")["nodes"][-1]["status"] == "done")
+        check("saves the canvas", post("/api/canvas", {"project": "demo", "positions": {"n1": [10, 20], "zz": [0, 0]}})[1]["positions"] == {"n1": [10.0, 20.0]})
+        status, opened = post("/api/threads", {"project": "demo", "style": "glyph", "message": "softer shadows"})
+        check("a style thread opened with the user's words is the agent's turn", status == 200 and not state(f"/api/thread?project=demo&thread={opened['thread']}")["waiting"])
+        check("edits style.md as a revision", post("/api/styles/edit", {"project": "demo", "style": "glyph", "file": "style.md", "text": "# glyph\n\nedited\n"})[0] == 200 and state("/api/style?project=demo&style=glyph")["revisions"][-1]["source"] == "owner")
+        check("asks for a probe run", post("/api/runs", {"project": "demo", "style": "glyph"})[0] == 200)
+        status, created = post("/api/styles", {"project": "demo", "name": "새-스타일"})
+        check("creates a style named in Korean with its thread", status == 200 and created["thread"])
+        check("a name with capitals is refused", post("/api/projects/rename", {"project": "demo", "name": "Demo"})[0] == 400)
+        check("renames a project", post("/api/projects/rename", {"project": "other", "name": "다른"})[0] == 200 and get(f"/api/project?project={quote('다른')}")[0] == 200)
+        check("deletes a project", post("/api/projects/delete", {"project": "다른"})[0] == 200 and not (workspace / "projects/다른").exists())
     finally:
         process.terminate()
         process.wait()
@@ -241,7 +289,7 @@ def words():
     web = ENGINE.parent / "web"
     korean = set(re.findall(r'^  ("(?:[^"\\]|\\.)*"): ', (web / "i18n.js").read_text(), re.M))
     shown = set()
-    for name in ("app.js", "ui.js"):
+    for name in ("app.js", "ui.js", "canvas.js"):
         source = (web / name).read_text()
         shown.update(re.findall(r'\bt\(("(?:[^"\\]|\\.)*")', source))
         for singular, plural in re.findall(r'\btn\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")', source):
@@ -256,7 +304,6 @@ def main():
     words()
     workspace = Path(tempfile.mkdtemp(prefix="asset-studio-verify-")).resolve()
     try:
-        (workspace / "styles").mkdir()
         server(workspace, lifecycle(workspace))
         key(workspace)
     finally:
