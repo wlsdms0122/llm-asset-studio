@@ -1,19 +1,39 @@
 # Workflow
 
-How the agent runs a style from the first conversation to making images, on the web studio or in conversation. What a style is and how `style.md` is written is in `writing-styles.md`; working out an image in ideation in `ideation.md`; prompting in `prompting.md`; models in `models.md`; reviewing images in `review.md`.
+How the agent runs a project: making its styles, improving them, and making images with them, on the web studio or in conversation. What a style is and how `style.md` is written is in `writing-styles.md`; working out an image in ideation in `ideation.md`; prompting in `prompting.md`; models in `models.md`; reviewing images in `review.md`.
 
-## Lifecycle of a style
+## The idea
 
-A style is made in one make session (discover, sample, confirm) and then used in as many generate sessions as the user opens. Each session is a folder of rounds (see Rounds and surfaces).
+The point is consistent images that fit a purpose. A project holds the purpose (`project.md`) and the styles made for it. A style is never finished: every image shows something to improve, so a style is a source that keeps changing, and every change is a revision. Changes are tried on the style's probes, a fixed set of test requests, before and after, the way a UI change is checked against its snapshot tests. Every image records the style revision it was drawn with, so what made an old image is always known.
 
-1. discover: one conversation that makes the style. The user describes what they want and attaches images; the agent describes the style back in plain words and writes it into `style.md` in full detail, shows candidate images when a picture settles a question faster than words, and asks the questions that change the image most. The user replies, attaches more, and picks candidates with a reason. When the agent believes the style is pinned down it says so, with the description, and proposes sampling; moving on (`sample`) is the user's call. See Discovering a style.
-2. sample: the agent picks the model, writes `prompting/<model>.md` and `model`, and the user tries the style on their own requests, one free-form request and one image at a time. Each image is shown with the request and the prompt written from it. No reference images are attached, so a sample tests whether the words alone hold the style. The user asks for another (`request`), goes back to the conversation (`discover`), which continues where it left off, or moves on (`confirm`).
-3. confirm: every sample image is offered as a reference, and the user picks the ones that are the style. When the picks are too few or too alike to teach the style (see References), or the user asks for more, the agent adds a few images, labeled as added, in a new confirm round that opens with the earlier picks still picked. On `done` the agent runs `session.py confirm`: the picks become `references/`, they are archived, and the make session is removed.
-4. generate and ideation: making images with the confirmed style. A generate session is the board: the user describes an image, then refines it by picking the attempt to build on and saying what to change, or starts a new one. An ideation session is the conversation, for a user who does not know yet what the image should be: the agent works the image out with the user as a designer would and draws it there (see Ideation). A session stays what it opened as. Every image made with the style is archived the moment it is shown. A session stays as a thread the user comes back to, until the user deletes it; the user may give it a name, and deleting removes its rounds, never the archived images.
-5. curating: the user adds images to the references and takes them out at any time, from the archive, from a session, or by upload (see References). `style.md` stays as confirmed. Adding a model runs a model session (see Prompting per model), and the user picks which of the style's models images are made with, or removes one that is not in use (`style.py model-remove`).
-6. new from a style: changing how a confirmed style looks makes a new style from it (`session.py new <styles> <name> --from <style>`). It starts with the base's `style.md`, and the base's references as the images of its first discover round, then runs the same discover, sample, and confirm. The user may fix a detail or turn the style somewhere else. The base's prompting files are not copied, since they translate words that are about to change; at sample the agent writes this style's prompting file, starting from the base's when it keeps the same model.
+The web page and the conversation are two surfaces over the same records. Whatever the user does on one is a record the other reads.
 
-Each stage goes forward on the user's word and back one stage when the user wants; a reason is welcome but not asked for, since going back picks up where that stage left off. Going back loses nothing: `style.md` carries over, every round keeps a copy of the words it showed, and returning to a stage brings back its images.
+## Projects
+
+A project is one purpose: an app, a blog, a product line (`project.py new <name>`). Its `project.md` says what the images are for, where they are seen and at what size, who sees them, the brand's colors and tone, and the decisions that hold for every image in it. The agent reads it before writing any prompt for the project and keeps it current: a decision the user makes for the whole project (the colors of an app) goes into `project.md`, or into a guide (see Extends and guides), never only into one prompt.
+
+A style lives in one project. To use a style in another project, copy it (`style.py new <project> <name> --from <style>`); the copy starts as its own first revision and says where it came from. Styles that should improve together live in one project and extend the same base.
+
+## A style is a source
+
+A style is its files: `style.md` (the style in words), `style.json` (the model in use, the styles it extends, whether it is a guide), `probes.md`, `prompting/<model>.md`, and `references/` with an annotation beside each image. Every change to them is a revision:
+
+- The user's own changes (an edit on the style page, a reference added or removed, the model switched, extends changed, a revision restored, a proposal accepted) record a revision at once.
+- The agent's edits are recorded with `style.py revise <style> --summary "<what changed>"` when a step is done. Anything left unrecorded is recorded the moment the style draws, so every image names a real revision.
+- Each revision keeps the hash of every file, and the contents stay in the workspace's `objects/`, so any revision can be shown (`style.py effective --revision N`) or restored (`style.py restore`).
+
+The user never manages versions. Revisions pile up on their own, like commits.
+
+## Making a style
+
+A new style opens a style thread with the first question (`style.py new <project> <name>`, or "New style" on the web). The thread is the conversation that finds the style; see Discovering a style.
+
+1. Discover, in the thread: the agent writes `style.md` from the conversation, shows draft candidates when a picture settles a question faster than words, and asks what changes the image most.
+2. When the words hold, the agent picks the model (`models.md`), writes `style.json`'s model and `prompting/<model>.md`, and writes `probes.md`: six to eight requests that cover the style's range, at least half of them subjects the conversation never showed (see Probes). It records the revision and says in the thread that the style is ready to try, with what a probe run costs.
+3. The user runs the probes (the style page's "Run probes", or asks in the thread; `probe.py request <style>`). With no references yet, the run draws from the words alone, the way sample images did. The user may add requests of their own to a run. Reactions go back into the thread, and the agent keeps fixing `style.md` and the prompting file and asks for another run when it helps.
+4. The user picks references from the probe images (any image can be added to the references wherever it is shown). From the first style reference on, the style can draw (`Style.blocked` says what is missing until then). The agent annotates each reference and checks the set (see References).
+
+From then on there is no separate stage: the style is used and improved in the same way.
 
 ## Discovering a style
 
@@ -32,182 +52,198 @@ Talk comes before pictures. While the direction is unclear, at any point in the 
   - A wide question (which of a few directions): images far apart from each other on that question.
   - A narrow question (how much of one property): images that differ in that one property, with everything else the same, where the agent is least sure and the answer matters most.
   - Whether the words hold: one image from the written style alone, next to near misses that each break one rule on purpose. The user choosing the faithful one, for the reason the rule gives, confirms the words.
-  - Every candidate is labeled with the style difference it shows (`publish --describe`), and the note says what to compare, what stays the same across them, and what to ignore (the subject, small defects of the draft model). "1 and 2 differ only in the outline: none, or a thin dark line" lets the user answer about the style, and a pick turns straight into a value in `style.md`; unlabeled pictures invite a pick by subject.
+  - Every candidate is labeled with the style difference it shows (`thread.py publish --describe`), and the note says what to compare, what stays the same across them, and what to ignore (the subject, small defects of the draft model). "1 and 2 differ only in the outline: none, or a thin dark line" lets the user answer about the style, and a pick turns straight into a value in `style.md`; unlabeled pictures invite a pick by subject.
   - All candidates show one plain subject from outside the style's domain (a mug, a chair, a potted plant), or from inside it when the style is scoped to that domain. The subject stays the same while a question is open, so a difference between candidates is a difference in style.
 - A style made for a kind of asset (app icons, logos, thumbnails) is judged in use. One plain subject on a plain background settles the rendering, but the user cannot tell from it how the style will feel on real assets. Once the rendering is roughly settled, show it applied: a few made-up uses with different subjects and colors, and a composite of how they sit together where they are seen (icons masked and laid out at home screen sizes). The composite is put together locally and costs nothing.
 - Candidate images come from the draft model (`models.md`: free when a free model can show it, otherwise a cheap paid one after the user says yes). Their job is to show which way the style goes, not quality, and the message says what to look at and what to ignore.
-- Signs the style is pinned down: the important values have stopped changing; the agent can predict the user's pick before showing it; the image from the written style alone was chosen; every section is filled, with what is undecided marked open. Then the agent proposes sampling. Signs of fatigue (shorter replies, "anything is fine", picks that flip back and forth) mean stopping to summarize or changing the question, not more images. A conversation that goes on without settling is missing a question: ask a broader one or ask for another reference.
-- Coming back from sample, the conversation already shows what the sample drew, in the place it was drawn; the agent's next message refers to those images instead of attaching them again.
+- Signs the style is pinned down: the important values have stopped changing; the agent can predict the user's pick before showing it; the image from the written style alone was chosen; every section is filled, with what is undecided marked open. Then the agent writes the probes and proposes a run. Signs of fatigue (shorter replies, "anything is fine", picks that flip back and forth) mean stopping to summarize or changing the question, not more images. A conversation that goes on without settling is missing a question: ask a broader one or ask for another reference.
 
-## Sampling
+## Improving a style
 
-- The model is the agent's call, made for this style: how well it reads the kind of look, whether it takes references, what it costs. The current default is Seedream 5.0 Flash (`bytedance-seed/seedream-5-0-flash`: $0.018 an image, 14 references at no extra cost, seed). Before the first sample the agent writes `model` and `prompting/<model>.md`.
-- Each request is turned into a prompt by following `style.md` and the prompting file, with `prompting.md` underneath; a request is never pasted into a template. Every image is reviewed with `review.md` before it is shown, against the Checks in `style.md`.
-- Every reaction is sorted before it is applied. A fix that would hold for any subject (softer shadows) is a style fix and edits `style.md`. A fix about this image only (a wrong count) goes into the prompt. A fix that `style.md` already asks for and the model missed goes into the prompting file. When unsure, the agent asks once: "should every image look like this, or just this one?"
-- The sample board is a list of images in the order they were drawn, each with its request, the prompt, and what the agent has to say about that image (`publish --describe`); it is not a conversation.
-- Samples vary their subjects, so a style fix that only suited the discovery subject shows here.
+Reactions come from anywhere: a note in a thread, a request on the canvas that keeps asking for the same change, a review that keeps finding the same drift, or the user editing a rule on the style page. The agent sorts every reaction before acting on it:
+
+- About this image only (a wrong count, one odd leaf): it goes into the next prompt, as a new node. The style does not change.
+- Something `style.md` already asks for and the model missed: a change to the prompting file.
+- Something that should hold for every subject (softer shadows, fewer colors): a change to `style.md`.
+- Something the references carry (every reference has a navy background, so every image does): a change to the references or their annotations. Words alone will not move it.
+
+When unsure, it asks once: "should every image look like this, or just this one?"
+
+Once a style has references, a change to it goes to the user as a proposal, not as an edit (`proposal.py propose`). A proposal is a diff against the current revision, rule by rule: the summary and the reason in the user's language, where the reaction came from (`--source n12` or a thread round), and the files it changes (`--set style.md=<file>`, `--set references/07.png=<image>`, `--remove references/03.jpg`). When the change fights something, it says so (`--conflict`): above all a property every reference shares that the words now contradict, since the references will win. The agent points to the proposal from the thread round that answers the reaction (`thread.py publish --proposal p3`).
+
+The user tries it: "Run probes" on the proposal draws the probes with the proposed style (`probe.py request <style> --proposal p3`), shown next to the current revision's run, request by request. The run's cost is shown before it starts. Accepting makes the proposal the next revision; rejecting keeps it on record. A proposal is accepted only while the files it changes are as they were when it was written; otherwise the agent writes it again on the current revision.
+
+While a style has no references yet (it is being made), the agent edits its files directly in the thread and records revisions; there is nothing to protect yet.
+
+## Probes
+
+`probes.md` holds the style's probe requests, one `- ` line each. They are the style's snapshot tests, chosen once and changed rarely, so runs stay comparable:
+
+- Six to eight requests across the style's range: its main use (an app icon of a plain object), a subject from each kind the Subjects section covers (a person, an animal, a place), and at least half that no reference shows, since those test the words rather than the references.
+- One request that breaks the style easily (a subject with its own strong look: metal, glass, a building) and one at the edge of the domain the style is scoped to.
+- Plain requests in the user's language or English, each a real request a user would make.
+
+A run draws one image per request with the run's revision or proposal, the references chosen per request as in generating, and is published in request order (`probe.py publish <run> <files...>`) with a note on what changed against the run it is compared with and a review per image. Probes are stale when the style changed after its last run (a new revision, or a base it extends changed); the style page says so.
 
 ## References
 
-Style models are usually trained on many images that share a style (LoRA, DreamBooth). This system does not train; the prompt-level equivalent is the reference set, sent with every generation. It follows the same rules as a training set:
+A reference is an image, its role, and what a generation takes from it. The role decides what the model is told to take and to ignore:
 
-- With one or two references a model copies them; with several it keeps what they share. Four to eight is the aim when the model takes them at no extra cost.
-- Varied subjects and compositions, consistent rendering. What the references share is what the model learns, so everything that should not be learned (subject, color scheme, layout) varies across them. Two cream references made every result cream.
-- Only clean examples. A reference with a defect teaches the defect.
-- They start as the sample images the user picks at confirm. Images the agent adds at confirm are made with the written style to fill what the picks lack (another subject, another color) and offered for the user to pick like any other.
-- After confirm the user curates them: an image that is the style can be added (a generated image, an archived one, an upload), and one that teaches the wrong thing taken out. Only images the user chose go in, so what the model learns stays what the user recognized as the style. The agent may suggest a reference (a new subject that came out right) but never adds one itself. Every change is recorded in the ledger, and an image that becomes a reference is archived. References never outnumber what the style's model takes (the studio refuses an addition or a model switch that would). Rounds and the ledger name references by their archived copies, so an old round still shows what was attached after the set changes.
-- The set changes, so a prompting file never lists the references by name; each generation names the attached references by what they show, after looking at them.
+| role | takes | ignores | lives in |
+|---|---|---|---|
+| style reference | how it is drawn: medium, light, texture, line, detail | its subject, its color layout, its composition | the style's `references/`, curated by the user |
+| subject reference | the shape of one subject: a mascot, a logo's form, a product silhouette | how it is drawn | the project's `subjects/`, or attached to a request |
+| composition reference | layout, pose, viewpoint, crop | its subject and how it is drawn | attached to a request |
+| guide reference | only what its guide covers (a palette swatch gives colors) | everything else | a guide's `references/` |
+
+- **Annotations.** Every reference gets an annotation when it comes in (`style.py annotate <image> --role ... --shows ... --take ... --ignore ...`): what it shows (subject and colors included), what to take, what to ignore. Each generation names the attached references from their annotations. A prompting file never lists references by name; the set changes, the annotations travel with the images. `watch` hands over a style whose references lack annotations.
+- **The set.** Style models are usually trained on many images that share a style; the prompt-level equivalent is the reference set. With one or two references a model copies them; with several it keeps what they share. Four to eight is the aim when the model takes them at no extra cost. What the references share is what the model learns, so everything that should not be learned (subject, color scheme, layout, background, angle) varies across them; two cream references made every result cream. Only clean examples: a reference with a defect teaches the defect. After every change to the set the agent checks what the style references share besides the style and records it (`style.py set-check <style> --shared "<what they share>"`, nothing when the set is varied); the style page shows it, and a shared property is a reason to suggest varying the set. `watch` hands over a set changed since its check.
+- **Only the user puts images in.** The agent may suggest a reference (a new subject that came out right) and may propose removing one, but adding one is the user's act, so what the model learns stays what the user recognized as the style.
+- **Choosing per generation.** Not every style reference goes with every generation. The agent leaves out a reference that shows nearly the same subject as the request (its pose and size come through however the prompt measures them) and attaches the rest, at least three when the style has them, style references first, then subject and composition references with the property each is for named. What was left out and why is recorded on the node (`node.py publish --drop 03.jpg="same subject as the request"`). How a model is told the roles is in the style's prompting file (see Prompting per model).
+- **Leakage.** Review has a fourth check: what came over from a reference that the request did not ask for (its subject, its color layout, its composition). A leak is recorded as the image's verdict (`review.md`), the style page shows each style's leak count, and repeated leaks from one reference are a reason to propose removing it or rewriting its annotation.
+
+## Extends and guides
+
+A style can build on other styles of the same project (`style.json` `extends`, set with `style.py extends` or on the style page). It is drawn as its effective style: the sections of every style it extends, in order, then its own; a later section replaces an earlier one of the same name, except Never and Checks, which add up. It draws with its own style references when it has any, else with the last base's that has them, and always with the guide references of every guide in its chain. Its model and its prompting files are its own, since prompting translates the effective style.
+
+A **guide** is a style that only lends sections: a palette (Color and value, colors by hex and name), a design system (Color, Shape, Line, a part of Composition), a brand's tone (Mood, Subjects). It never draws and has no probes; the styles that extend it are drawn and probed instead. Example: in a `deckit` project, `deckit-icon` extends `app-icon` (how icons are drawn) and `deckit-palette` (the app's three colors). Improving `app-icon` improves every icon style built on it; the app's colors change in one place.
+
+When a base or a guide changes, every style that extends it is marked: its probes are stale, and its prompting files may need their fixed style paragraph drawn again from the new effective style. The agent reads the effective style with `style.py effective <style>`, and `style.py materialize <style> <dir>` writes the effective style, its prompting files, and the references it draws with into a folder for reading (also `--proposal` and `--revision`).
 
 ## Prompting per model
 
 `prompting/<model>.md` (the model id with `/` written as `--`) holds what one model needs to draw this style:
 
 - The call: aspect ratio, resolution, quality, how many images a call, and which options the model ignores.
-- How references are attached and named for this model (Image 1..N, by role, or a separate style channel).
-- A fixed style paragraph drawn from `style.md`, used word for word in every prompt, since synonyms drift.
+- How references are attached and named for this model, by role: a model with a separate style channel gets style references there; a model that reads images by number gets "Image 1 is a style reference: take its rendering, not its subject"; a model that reads images by what they show gets the annotation's words.
+- A fixed style paragraph drawn from the effective `style.md`, used word for word in every prompt, since synonyms drift. It is drawn again whenever the effective style changes.
 - The prompt order and length for this model, and how the Subject line is written from a request.
 - Wording that held the style on this model and wording that broke it.
-- Prompts with and without references: sample prompts go out before there are any, so they name none; generate prompts attach and name them.
 
-The style paragraph is drawn again whenever `style.md` changes, so while a style is being made the agent redraws it before the next sample.
+What is true of a model in general goes into `models.md`, and what is true of prompting in general into `prompting.md`; a style's prompting file holds only what is particular to that style on that model.
 
-What is true of a model in general (it reads clauses as directives, it draws the crop shape it is told about) goes into `models.md`, and what is true of prompting in general into `prompting.md`; a style's prompting file holds only what is particular to that style on that model.
-
-Prompting files keep improving after confirm. When generate keeps missing something `style.md` already says, the prompting file is fixed.
-
-A style has one prompting file per model it can draw with, and `model` names the one in use; the user switches between them. Adding a model is a model session, opened by the user with the model chosen:
-
-1. The agent reads what the model accepts and how it reads prompts (`models.md`, the model's endpoint, its docs), and writes the session's `prompting.md` from `style.md` and the current model's prompting file.
-2. It draws one or two first images with the references attached, picked to show the style plainly (a subject like one of the references, and one the references do not show), reviews them side by side with the references, and publishes the first `model` round.
-3. The user asks for more, one request and one image at a time; the agent refines `prompting.md` from what drifts, as in sampling.
-4. On `done` the agent runs `session.py add-model`: the file joins `prompting/`. Choosing it as the style's model is the user's own step.
-
-The images a model session draws are made with the confirmed style, so they are archived like generated ones. Only models that take reference images are offered, since the style is drawn with its references attached.
+A style has one prompting file per model it can draw with, and `style.json` names the one in use; the user switches between them on the style page. Adding a model is a proposal: when the user asks for one (in a thread, or from the style page, which opens a thread with the request), the agent reads what the model accepts and how it reads prompts, writes its prompting file from the effective style and the current model's file, and proposes adding the file and making it the model in use. The probe run on that proposal is the comparison between the two models. Only models that take as many references as the style draws with are offered.
 
 ## Generating
 
-- Each generate session is its own thread, and the user may keep several. The agent reads the session's rounds (requests, prompts, picks) for what came before; nothing depends on the agent remembering another conversation.
-- The user describes an image; the agent writes the prompt from `style.md` and the prompting file, generates with the references, reviews with `review.md`, and publishes. Attempts are listed in the order they were drawn, the one being drawn last.
-- Refining rewrites the picked attempt's prompt with the user's change. Whether to also attach the picked attempt is the agent's call: the references carry the style, so the attempt is attached only when its composition has to survive. Images the user attaches to a request describe that request (a pose, an object) and go after the references.
-- Work on a finished image that needs no drawing goes through a tool instead of the model, on this computer and at no cost. Removing the background (`cutout`, macOS Vision) writes each image's subjects as a transparent PNG into the next round, so a request like "take the background off 2" is answered on the board like any other attempt. Prefer it to asking a model for a transparent background when the image already exists.
-- Every image shown is archived with its request, prompt, and model, or the tool that made it. The ones an app uses are copied into that app's repository.
-- Requests that keep asking for the same change are not about one image. If `style.md` already asks for it, the prompting file is fixed; if it asks for something else, the user wants a different style, and the agent suggests making one from this.
+The canvas is where images are made. A generation node is one request with a style: the user writes it in the composer with nothing selected (a new image), or with images selected (they become the node's parents; one selected image is a refine of it). In conversation the agent adds the node for the user (`node.py add <project> --style S --request "<the user's words>" [--parent <image>]`).
+
+For each generation node `watch` hands over, the agent:
+
+1. Reads the request, the parents and attachments, `project.md`, the effective style, and the prompting file, and the nodes it builds on for what came before; nothing depends on remembering another conversation.
+2. Chooses the references (see References) and writes the prompt from `style.md` and the prompting file, with `prompting.md` underneath. A request is never pasted into a template.
+3. Draws (`generate.py <node> --ref <image> ... --request "<the request>" --prompt-file <file>`), reviews every image with `review.md`, and publishes the node with a note in the user's language, a line per image, a review per image, and the references it left out (`node.py publish <node> --note ... --describe ... --review ... --drop ...`).
+
+Refining rewrites the parent's prompt with the user's change. Whether to also attach the parent is the agent's call: the references carry the style, so the parent goes along only when its composition has to survive, as a composition reference. Images the user attaches to a request describe that request (a pose, an object); the agent decides each one's role and names it.
+
+Work on a finished image that needs no drawing goes through a tool instead of the model, on this computer and at no cost. Removing the background (cutout, macOS Vision) is a tool node: the user asks for it on an image, the server runs it at once and the node holds the transparent PNG; in conversation `node.py add <project> --tool cutout --parent <image>`. Prefer it to asking a model for a transparent background when the image already exists.
+
+Requests that keep asking for the same change are not about one image; the agent sorts them as in Improving a style and proposes the change. Every node keeps its images, the style revision and model it was drawn with, the references used and left out, every call with its prompt and cost, so redrawing a node's request with a later revision is a new node with the same request.
 
 ## Ideation
 
-The style's page opens two kinds of session: "new image" opens a generate session, a board for a user who knows what to make, and "new ideation" opens an ideation session, a conversation for one who does not (`session.py open <style> ideation`). Each stays what it opened as; neither turns into the other.
+For a user who does not know yet what the image should be, an ideation thread works it out in conversation ("New ideation" on a style, or `thread.py open <style> ideation`). The agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the thread's `brief.md` as the image takes shape. Ideas are drawn with the draft model. When the image is concrete the agent proposes drawing it; the user's `generate` turns the brief into a generation node on the canvas, which the agent then draws like any other. The conversation goes on beside it: a fix about the idea updates the brief, a fix about the drawn image is a refine on the canvas. How the designer works and what the brief holds are in `ideation.md`.
 
-In ideation the agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the session's `brief.md` as the image takes shape, the way discovering a style writes `style.md`. Ideas are drawn with the draft model. When the image is concrete the agent proposes drawing it with the style's model; on the user's `generate` it writes a prompt from `brief.md`, `style.md`, and the prompting file, draws one image with the references, and shows it in the next discover round with what it has to say about it. The conversation goes on from there: the user reacts to the drawn image, the agent updates the brief and draws again. Images drawn with the style's model are archived like any other. How the designer works and what the brief holds are in `ideation.md`.
+## Surfaces
 
-## Rounds and surfaces
+- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: the nodes with their images and the agent's notes, edges from each parent image to the node built on it, frames, and the composer; beside it the brief, the styles, the threads, and the subjects. A style's page has its rules, the proposals with their diffs and probe comparisons, the probe runs, the references with their annotations and set check, the models, the revisions, and what it extends. A thread's page is the conversation. Reviews are not shown on a node until the user has built on one of its images or opened them, so they do not steer the pick. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
+- Conversation: the agent sends a numbered sheet (`sheet.py <thread | node | run>`), records the user's reply with `thread.py answer`, adds nodes with `node.py add`, and asks for runs with `probe.py request`.
 
-A round is one thing shown to the user and the user's answer to it. Its records are the source of truth; the web page and the conversation are two surfaces over the same records.
-
-| kind | shows | the user gives |
-|---|---|---|
-| discover | the conversation with its candidates and attachments, and what it writes (`style.md`, or in ideation `brief.md`) | a reply with attachments, picks with reasons, `sample` (make), or `generate` (ideation: draw the brief with the style's model) |
-| sample | `style.md`, the prompting file, and request / prompt / image for each image | `request`, `discover`, or `confirm` |
-| confirm | every sample image and any the agent added | picks and `done`, a reply asking for more, or `sample` |
-| generate | `style.md`, the references, and every attempt with its request, the attempt it was refined from, and its prompt | `refine` (picked attempt + request) or `new` |
-| model | the model's draft prompting file, the references, and every image with its request and prompt | `request` or `done` |
-
-Sessions live in `sessions/<style>/<session id>/`, next to the style, so the style folder holds only the style and its records. `session.json` says the kind of session (make, generate, ideation, model), when it started, the name the user gave it if any, and for a model session which model; an ideation session keeps its `brief.md` beside it. Each round is a folder in the session: `round.json` is written once by the agent and never rewritten, since the user has seen it; it carries a copy of `style.md` (and `brief.md` in ideation, and for boards the model and its prompting file) as they were shown, which is the history of the words. Publishing a board or confirm round carries over the images of the last round of the same kind in that session. Boards (sample, generate, model) read in the order images were drawn, the newest last; a confirm round shows the images the agent adds first, also carries every sample image, and starts with the user's picks from the last confirm round still picked. `feedback.json` is written once by a surface. Images the user attaches belong to the answer they are sent with, like a file attached to a message: they wait in the round's `attachments/` while it is open, `feedback.json` lists them, and the conversation shows them with that reply. Candidate numbers follow the display order, which a blind round shuffles with the round number as seed, so the page, `sheet.py`, and `session.py answer` agree on what "3" means. Confirming a style, adding a model, or the user deleting a session removes the session folder.
-
-- Web: `open-package studio` serves the studio (`source/web/`) for every style on `127.0.0.1:8770`. The home lists the styles and creates new ones; a right click on a style renames it, makes a new style from it, or deletes it. A style being made opens on its make session; a confirmed style opens on its overview (the model in use, the sessions, the references, recent images) with "new image", "new ideation", and "add model", and each session opens at its own address, where the user can rename it. Any image can be added to the references wherever it is shown; references are taken out only from the reference list. Being a reference is not shown on other images. The model picker shows each model's price for one 1K image (what it has cost here when it has been used) and offers only models that take as many references as the style has. The archive lists every archived image and downloads several at once. Pages poll, so an open tab follows the rounds. Review verdicts are not shown before the user answers.
-- Conversation: the agent sends `sheet.py` output and records the user's reply with `session.py answer`.
-
-The server writes only records: answers, new styles with their make session, new generate sessions (with an empty board) and model sessions (with none yet), images attached to or taken off the answer being written, and the user's own changes (renaming or deleting a style, deleting a session, references, the model in use). Generation always goes through the agent.
+The server writes only records: projects and briefs, styles and the user's own changes to them, proposals accepted or rejected, probe runs asked for, nodes asked for (a tool node it runs itself), the canvas layout, threads and answers. Generation always goes through the agent.
 
 ## Working on the web
 
 The web studio is the default surface. When the user starts, the agent starts `open-package studio`, gives its address, and works there until the user ends. The conversation surface is used when the user asks for it, or when the agent cannot keep a command running in the background; the agent says which surface it is using and why.
 
-On the web, the published round is the agent's message. Everything the user is meant to read or answer goes into it: the style or the image in plain words, what changed, and the questions (`publish --note`), and what each image tests or what the agent has to say about it (`--describe`). A user looking at the studio does not read the conversation, and an answer given in the studio is an answer to the round, not to anything said beside it. So the conversation gets one line saying which round is up and where, and nothing the user has to answer:
+On the web, what the agent publishes is its message. Everything the user is meant to read or answer goes into it: a thread round's note and its candidates' lines, a node's note and image lines, a run's note, a proposal's summary and reason. A user looking at the studio does not read the conversation, so the conversation gets one line saying what is up and where, and nothing the user has to answer:
 
-- Asking for the yes to a paid draft model, or a question before any image can be drawn, is a discover round with the question as its note and no images.
-- Proposing the next stage (sampling, drawing from the brief) goes in the note of the round that shows why.
-- When the user writes in the conversation about a session while the studio is in use, the agent records it with `session answer` and replies with the next round, so the page keeps the whole thread. Questions that belong to no session (which styles there are, what a model costs) are answered in the conversation.
+- Asking for the yes to a paid draft model, or a question before any image can be drawn, is a thread round with the question as its note and no images.
+- Proposing the next step (a probe run, drawing from the brief, a change to the style) goes in the round, node, or run that shows why.
+- When the user writes in the conversation while the studio is in use, the agent records it where it belongs (`thread.py answer`, `node.py add`) and answers there, so the page keeps the whole record. Questions that belong to no thread or node (which projects there are, what a model costs) are answered in the conversation.
 
-The agent waits for answers with `open-package session watch`, run in the background. It returns as soon as any session is the agent's turn (its last round is answered, or it is a model session with no round yet) and prints the folder of each one. For each folder the agent reads the answer (`session show`), does the work, and publishes the next round; then it runs `watch` again. `watch` looks at the records rather than at changes, so an answer that comes in while the agent is working is printed by the next run, and sessions already waiting when the agent starts are printed at once. It is run again for as long as the studio is open, including after a style is confirmed: generate requests and new model sessions (the user asking for that model) arrive the same way. A session the user deleted or renamed needs nothing from the agent.
+The agent waits with `open-package watch`, run in the background. It returns as soon as there is work and prints the folder of each place that has some:
+
+- `projects/<p>/threads/<id>`: the user answered the thread's last round. Read it (`thread.py show`), do the work, publish the next round.
+- `projects/<p>/nodes/<id>`: a generation waits. Draw it and publish the node.
+- `projects/<p>/styles/<s>/runs/<n>`: a probe run waits. Draw one image per request and publish the run.
+- `projects/<p>/styles/<s>`: a reference has no annotation, or the reference set changed since its check. Annotate, check the set, and say what the check found in the style's thread if it found something.
+- `projects/<p>/subjects`: a subject reference has no annotation.
+
+Then it runs `watch` again, for as long as the studio is open. `watch` reads the records rather than changes, so work that came in while the agent was busy is printed by the next run, and work already waiting is printed at once. Every look is recorded in `agent.json`, which is how the page knows an agent is attached. Something the user deleted or renamed needs nothing from the agent.
 
 ## Usage
 
-Commands run as `open-package <command>` inside the workspace (`~/.config/asset-studio`, or `ASSET_STUDIO_HOME`), which holds `styles/`, `sessions/`, and the API key stored with `open-package key`. Paths are given relative to the workspace.
+Commands run as `open-package <command>` inside the workspace (`~/.config/asset-studio`, or `ASSET_STUDIO_HOME`). Paths are given relative to the workspace.
 
 ```
-# studio, left running, and the agent's wait for the next answer, run again after each round it publishes
+# studio, left running, and the agent's wait for work, run again after each piece of work
 open-package studio
-open-package session watch
+open-package watch
 
-# a new style, or one made from a confirmed style, starts with its make session and a discover round
-open-package session new <style>
-open-package session new <style> --from <confirmed style>
-S=sessions/<style>/<session id>       # every command below takes the session folder
+# a project and a style; a new style prints its folder and its thread
+open-package project new <project>
+open-package style new <project> <style>              # --guide for a guide, --from <style> to copy another project's style
+P=projects/<project>; S=$P/styles/<style>; T=$P/threads/<id>
 
 # the draft model for candidates (models.md): a free one, else the first listed candidate, after the user's yes
 open-package models --free
 D=<draft model id>
 
-# discover: after rewriting styles/<style>/style.md, a turn with candidates
-open-package generate $S --model $D --prompt-file /tmp/1.md --into c1 --tag discover
-open-package generate $S --model $D --prompt-file /tmp/2.md --into c2 --tag discover
-R=$(open-package session next $S)          # the round those images went into
-open-package session publish $R --kind discover --note "<the style in plain words, what changed, the questions>" \
-  --describe "<reading 1>" --describe "<reading 2>" --review "<verdict 1>" --review "<verdict 2>"
+# a thread round: after editing $S/style.md, candidates from the draft model
+open-package generate $T --model $D --prompt-file /tmp/1.md --into c1
+open-package generate $T --model $D --prompt-file /tmp/2.md --into c2
+open-package thread publish "$(open-package thread next $T)" --note "<the style in plain words, what changed, the questions>" \
+  --describe "<reading 1>" --describe "<reading 2>"
+open-package style revise $S --summary "<what changed>"
 
-# sample: after writing styles/<style>/model and styles/<style>/prompting/<model>.md
-open-package generate $S --request "<the user's words>" --prompt-file /tmp/prompt.md --tag sample
-open-package session publish "$(open-package session next $S)" --kind sample --describe "<what to say about it>"
+# probes: after writing style.json's model, prompting/<model>.md, and probes.md
+open-package probe request $S                        # what the user's "Run probes" does
+R=$S/runs/<n>
+open-package generate $R --request "<probe 1>" --prompt-file /tmp/p1.md --into 1 --ref $S/references/01.png
+open-package probe publish $R $R/1/<image> $R/2/<image> ... --note "<what changed>" --review "<verdict 1>" ...
 
-# confirm: every sample image is offered; images the agent adds come first, labeled
-open-package generate $S --request "another subject: a clock" --prompt-file /tmp/clock.md --into clock --tag confirm
-open-package session publish "$(open-package session next $S)" --kind confirm --note "..." --describe "added: a clock"
-open-package session confirm $S            # after the user's done
+# references: annotate each, then check the set
+open-package style annotate $S/references/01.png --role style --shows "<what it shows>" --take "<what to take>" --ignore "<what to leave>"
+open-package style set-check $S --shared "<what every style reference shares besides the style>"
 
-# generate: the user opens sessions on the web; in conversation the agent opens one
-G=$(open-package session open styles/<style> generate)
-open-package generate $G --references --request "<the user's words>" --prompt-file /tmp/prompt.md --tag generate
-open-package session publish "$(open-package session next $G)" --kind generate --describe "..."
-# a tool on an image already made: the background removed, into the next round
-open-package cutout $G "$G/<round>/<image>" --request "<the user's words>"
-open-package session publish "$(open-package session next $G)" --kind generate --describe "..."
+# a change once the style has references: propose, the user runs probes on it and accepts or rejects
+open-package proposal propose $S --summary "<change>" --reason "<why>" --source n12 --set style.md=/tmp/style.md
+open-package probe request $S --proposal p3
+open-package proposal show $S p3
 
-# ideation: the user opens it on the web; in conversation the agent opens one
-# $I/brief.md is written once the image has a shape, and from then on the user can ask for it drawn (generate)
-I=$(open-package session open styles/<style> ideation)
-open-package generate $I --model $D --prompt-file /tmp/1.md --into c1 --tag discover
-open-package session publish "$(open-package session next $I)" --kind discover --note "<the need as understood, the ideas and why, the recommendation, the decisions>" --describe "<idea 1 and why it fits>"
-# after the user's generate: draw from brief.md with the style, into the conversation
-open-package generate $I --references --request "<brief.md heading>" --prompt-file /tmp/prompt.md --tag discover
-open-package session publish "$(open-package session next $I)" --kind discover --note "<what was drawn, what to look at>" --describe "..."
+# a generation node: the user adds it on the canvas; in conversation the agent adds it
+N=$(open-package node add <project> --style <style> --request "<the user's words>" --parent $P/nodes/n3/<image>)
+open-package generate $N --ref style=$S/references/01.png --ref style=$S/references/04.png --ref composition=$P/nodes/n3/<image> \
+  --request "<the user's words>" --prompt-file /tmp/prompt.md
+open-package node publish $N --note "<what was drawn>" --describe "..." --review "<verdict>" --drop "03.jpg=<why it was left out>"
+open-package node add <project> --tool cutout --parent $P/nodes/n3/<image>
 
-# model: write $M/prompting.md, then draw with the references
-M=$(open-package session open styles/<style> model --model <model id>)
-open-package generate $M --references --request "<a first subject>" --prompt-file /tmp/prompt.md --tag model
-open-package session publish "$(open-package session next $M)" --kind model --describe "..."
-open-package session add-model $M          # after the user's done
+# ideation: $T/brief.md is written once the image has a shape; the user's generate turns it into a node
+open-package thread open $S ideation --message "<the user's first words>"
+
+# extends and guides
+open-package style extends $S <base> <guide>
+open-package style effective $S
+open-package style materialize $S /tmp/effective --proposal p3
 
 # the user's own changes, asked in conversation
-open-package style reference-add styles/<style> <image>
-open-package style reference-remove styles/<style> 03.jpg
-open-package style use styles/<style> <model id>
-open-package style model-remove styles/<style> <model id>
-open-package style rename styles/<style> <new name>
-open-package session rename $G "<the name the user gave>"
-open-package session delete $G
+open-package style reference-add $S <image>
+open-package style reference-remove $S 03.jpg
+open-package style use $S <model id>
+open-package style model-remove $S <model id>
+open-package style restore $S <revision>
+open-package style rename $S <new name>
+open-package proposal accept $S p3
+open-package thread rename $T "<the name the user gave>"
+open-package project subject-add <project> <image>
 
 # conversation surface
-open-package sheet $S
-open-package session answer $S --comment "layers should look thicker"
-open-package session answer $S --picked 2 --note "2=the shadow is softer" --note "3=too dark" --comment "closest"
-open-package session answer $S --decision sample
-open-package session answer $S --decision request --request "a warm feel, a teddy bear and a pot"
-open-package session answer $S --picked 1,3,4 --decision done
-open-package session answer $I --comment "an icon for a weather app, no idea what to draw"
-open-package session answer $I --picked 2 --decision generate
-
-# what a surface sees
-open-package session show $S
+open-package sheet $T                                 # also a node or a run
+open-package thread answer $T --comment "layers should look thicker"
+open-package thread answer $T --picked 2 --note "2=the shadow is softer" --note "3=too dark" --comment "closest"
+open-package thread answer $T --decision generate     # ideation: draw the brief
+open-package thread show $T
+open-package node show $N
 ```
 
-`generate.py` writes into the session's next round (into a subfolder with `--into`) and records the call, with the session, in the style's ledger; `session.py next` prints that same round, and publishing it without a file list shows everything generated into it, subfolders included. `publish --review` keeps the agent's verdict on each new image (`review.md`); the user sees it after answering that round. `--dry-run` prints the request body without sending it. Options a model does not accept are dropped and reported; what a model accepts is read from OpenRouter and cached in the workspace's `cache/` for a day.
+`generate.py` writes into the node, the run, or the thread's next round (a subfolder with `--into`) and records each call beside the images in `calls.jsonl`: the model, the revision, the request, the prompt, the references with their roles, the options, the cost. `--dry-run` prints the request body without sending it. Options a model does not accept are dropped and reported; what a model accepts is read from OpenRouter and cached in the workspace's `cache/` for a day.

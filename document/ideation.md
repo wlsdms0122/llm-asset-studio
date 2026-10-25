@@ -1,6 +1,6 @@
 # Ideation
 
-How the agent works out what an image should be when the user does not know yet. Ideation is a session of its own, a conversation of discover rounds; the commands and the records are in `workflow.md`.
+How the agent works out what an image should be when the user does not know yet. Ideation is a thread of its own, a conversation in rounds; the commands and the records are in `workflow.md`.
 
 ## The role
 
@@ -43,14 +43,14 @@ The first message restates the need as a design problem in one or two plain sent
 
 - Every ideation candidate comes from the draft model (`models.md`). A draft costs nothing or close to it, so the agent can show more and iterate faster: more ideas in the first round, more versions while developing, a fresh image instead of a long explanation.
 - The draft model does not draw the style. Each message says what to look at (the idea, the subject, the layout) and what to ignore (the rendering), and each prompt describes the idea in the style's subject terms so the only difference from the final image is the rendering.
-- These are roughs, so they are not archived.
-- When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's `generate` is the go-ahead: the image is drawn with the style's model and references and shown in the conversation, and it is archived. The user's reaction to it goes on in the same conversation; a fix about the idea updates the brief, a fix about this image goes into the next prompt.
+- These are roughs, so they stay in the thread and do not become nodes.
+- When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's `generate` is the go-ahead: the brief becomes a generation node on the canvas, drawn with the style's model and references like any other, and the next round points to it. The user's reaction goes on in the thread or on the canvas; a fix about the idea updates the brief, a fix about the drawn image is a refine of it.
 
 ## The brief
 
-`brief.md` in the session folder is the written result of ideation, the way `style.md` is the result of discovering a style. The agent writes it once the image has a shape and keeps it current every turn. It is in English, in the terms the style's prompting file uses, so a prompt can be written from it without the conversation:
+`brief.md` in the thread's folder is the written result of ideation, the way `style.md` is the result of discovering a style. The agent writes it once the image has a shape and keeps it current every turn. It is in English, in the terms the style's prompting file uses, so a prompt can be written from it without the conversation:
 
-- a first line that names the image (the session is listed by it)
+- a first line that names the image (the thread is listed by it, and the node's request starts with it)
 - Use: where it is seen, at what size, and what it sits with
 - Idea: what the image says, in one sentence
 - Subject and elements: what is in it, how many, and what each looks like
@@ -58,4 +58,4 @@ The first message restates the need as a design problem in one or two plain sent
 - Text: none, or exactly what and where
 - Open: what is still undecided
 
-Rendering does not go in the brief; that is `style.md`. A reaction about rendering is sorted as in generating: if `style.md` already asks for it, the prompting file is fixed; if it asks for another look, that is a new style.
+Rendering does not go in the brief; that is `style.md`. A reaction about rendering is sorted as in improving a style (`workflow.md`): a change to the prompting file, to `style.md`, or to the references, proposed to the user.
