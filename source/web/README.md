@@ -52,6 +52,10 @@ Each color token is `light-dark(light, dark)`, so one definition serves both the
 | `emptyState({ title, text, action })` | a list with nothing in it yet |
 | `workingNote(text)` | the agent is working |
 | `imageFrame(path, { fit, number, check, tools, onClick })` | every image larger than a thumbnail |
+| `notice(text, { tone, items, action })` | a message that stays while something holds (probes behind, a base changed); tone `warning` for what is behind or fights |
+| `tabBar({ items, value, onChange })` | switching what a page shows in place, such as the style page's sections |
+| `markdownView(text, { isOpen, onToggle })`, `diffView(text)` | a markdown document with collapsible `##` sections; a unified diff with added and removed lines colored |
+| `orderPicker({ items, chosen })` | choosing several in an order that matters, inside `ask({ content, result })` |
 | `thumb(path, { picked, small, remove, badge, src })` | small images in a row (attachments, subjects, picks in a reply or in the composer, with their number or node as the badge); `src` for a file not uploaded yet |
 
 ## Screens
@@ -60,7 +64,7 @@ Each color token is `light-dark(light, dark)`, so one definition serves both the
 |---|---|---|
 | `#/` | `app.js` | the projects as cards: cover, name, purpose, styles, how many items wait for the agent; right-click to rename or delete |
 | `#/p/<project>` | `canvas.js` | the project canvas (below), the panel (brief, styles with their guide badge, why one cannot draw, open proposals; New style and New guide; threads and New ideation; subjects), and the composer. `?node=<id>` brings a node into view |
-| `#/p/<project>/s/<style>` | `style.js` | the style page. `?proposal=<id>` names a proposal to show |
+| `#/p/<project>/s/<style>` | `style.js` | the style page: header (what it builds on, model, revision, why it cannot draw, base or probes behind), then tabs for rules, proposals (diffs, probe comparison, accept or reject), probes and runs, references with annotations and the set check, models, revisions, extends, threads. `?tab=<name>` opens a tab, `?proposal=<id>` a proposal |
 | `#/p/<project>/t/<thread>` | `app.js` | a thread: rounds of the agent's note with its candidates, proposals and nodes it points to, and the user's replies; the composer answers the open round (picks, notes, reply, attachments). The panel shows style.md as the latest round showed it, or an ideation's brief with Draw it |
 | `#/archive` | `app.js` | every node image grouped by project; select several to download as a zip |
 
@@ -80,4 +84,4 @@ page("style", {
 });
 ```
 
-`route` is `{ name, project, style | thread, params }`, `params` the hash's query. A `load` that throws a 404 or 400 shows "Cannot open this page"; a lost server shows the reconnecting banner. Shared helpers in `app.js`: `api(path, body)` (JSON only; a response with `agent` updates the app bar), `hashes.*` for links, `inProject(project, path)` for a project path's file, `agentAttached()`, `panelHead`, `panelResizer`, `openLightbox`, `nodeImageItem`, `reviewLine`, `blockedReason`, `addToReferences`, `askName`, `confirmDelete`, `when`, `money`.
+`route` is `{ name, project, style | thread, params }`, `params` the hash's query. A load answered after the viewer moved on draws nothing: after each await it returns when the route it was given is no longer `route`. A `load` that throws a 404 or 400 shows "Cannot open this page"; a lost server shows the reconnecting banner. Shared helpers in `app.js`: `api(path, body)` (JSON only; a response with `agent` updates the app bar), `hashes.*` for links, `inProject(project, path)` for a project path's file, `agentAttached()`, `panelHead`, `panelResizer`, `openLightbox`, `nodeImageItem`, `reviewLine`, `blockedReason`, `addToReferences`, `askName`, `confirmDelete`, `when`, `money`.

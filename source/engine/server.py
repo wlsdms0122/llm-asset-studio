@@ -32,7 +32,7 @@ from workspace import RecordError
 
 ENGINE = Path(__file__).resolve().parent
 WEB = ENGINE.parent / "web"
-PAGES = ("/i18n.js", "/ui.css", "/ui.js", "/app.css", "/app.js", "/canvas.js", "/style.js")
+PAGES = ("/i18n.js", "/ui.css", "/ui.js", "/app.css", "/app.js", "/canvas.js", "/style.js", "/style.css")
 
 
 def main():

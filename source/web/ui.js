@@ -31,7 +31,10 @@ const ICONS = {
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
   open: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
-  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>'
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  restore: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'
 };
 
 const $ = id => document.getElementById(id);
@@ -189,7 +192,7 @@ function composer({ value = "", placeholder = "", sendTitle, onInput = null, onS
 
 // ---------- labels ----------
 
-// tone: "" (neutral), accent, success, danger. dot: null, "static", "live".
+// tone: "" (neutral), accent, success, warning (behind or in conflict), danger. dot: null, "static", "live".
 function pill(text, { tone = "", dot = null, small = false } = {}) {
   return h("span", { class: ["pill", tone, small && "small"].filter(Boolean).join(" ") }, [dot ? h("span", { class: `dot${dot === "live" ? " live" : ""}` }) : null, text]);
 }
@@ -215,12 +218,139 @@ function workingNote(text) {
   return h("div", { class: "working-note" }, [h("span", { class: "spinner" }), text]);
 }
 
+// A message that stays on the page while something holds, such as a style whose probes are behind it.
+// tone: "" (information) or warning (something is behind or fights). text: a line or a node; items: lines under it.
+function notice(text, { tone = "", items = null, action = null } = {}) {
+  return h("div", { class: ["notice", tone].filter(Boolean).join(" ") }, [
+    h("div", { class: "notice-text" }, [
+      text == null ? null : text instanceof Node ? text : h("p", { text }),
+      items && items.length ? h("ul", {}, items.map(item => h("li", { text: item }))) : null
+    ]),
+    action
+  ]);
+}
+
+// ---------- tabs ----------
+
+// items: [{ value, label, count? }]. Switches what a page shows in place; scrolls sideways when it does not fit.
+function tabBar({ items, value, onChange }) {
+  return h("div", { class: "tabs", role: "tablist" }, items.map(item => h("button", {
+    class: `tab${item.value === value ? " on" : ""}`, type: "button", role: "tab", "aria-selected": item.value === value ? "true" : "false",
+    onclick: () => { if (item.value !== value) onChange(item.value); }
+  }, [h("span", { text: item.label }), item.count ? h("span", { class: "tab-count", text: String(item.count) }) : null])));
+}
+
+// ---------- text ----------
+
+const escapeHtml = text => text.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+const inlineMarkdown = text => escapeHtml(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+// The blocks of a markdown text: ### headings, - and 1. lists (two spaces indent a level), tables, and paragraphs.
+function markdownBlocks(lines) {
+  const blocks = [];
+  let list = null;
+  let paragraph = null;
+  let table = null;
+  const close = () => { list = paragraph = table = null; };
+  for (const line of lines) {
+    const bullet = /^(\s*)([-*]|\d+\.)\s+(.*)$/.exec(line);
+    if (!line.trim()) { close(); continue; }
+    if (/^#{3,6}\s/.test(line)) { close(); blocks.push(h("h4", { html: inlineMarkdown(line.replace(/^#+\s*/, "")) })); continue; }
+    if (line.trim().startsWith("|")) {
+      if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) continue;
+      if (!table) { close(); table = h("table"); blocks.push(h("div", { class: "markdown-table" }, [table])); }
+      table.append(h("tr", {}, line.trim().replace(/^\||\|$/g, "").split("|").map(cell => h(table.rows.length ? "td" : "th", { html: inlineMarkdown(cell.trim()) }))));
+      continue;
+    }
+    if (bullet) {
+      const ordered = /\d/.test(bullet[2]);
+      if (!list || list.ordered !== ordered) { close(); list = { ordered, node: h(ordered ? "ol" : "ul") }; blocks.push(list.node); }
+      list.node.append(h("li", { class: bullet[1].length >= 2 ? "nested" : null, html: inlineMarkdown(bullet[3]) }));
+      continue;
+    }
+    if (list && /^\s/.test(line)) { list.node.lastChild.insertAdjacentHTML("beforeend", " " + inlineMarkdown(line.trim())); continue; }
+    if (!paragraph) { close(); paragraph = h("p"); blocks.push(paragraph); }
+    paragraph.insertAdjacentHTML("beforeend", (paragraph.childNodes.length ? " " : "") + inlineMarkdown(line.trim()));
+  }
+  return blocks;
+}
+
+// A markdown document as the page reads it, such as style.md: its # title left out, the text before the first ##
+// section, then each ## section collapsible. isOpen(heading) says whether a section starts open; onToggle(heading,
+// open) keeps the choice so a redraw does not undo it.
+function markdownView(text, { isOpen = () => true, onToggle = null } = {}) {
+  const preamble = [];
+  const sections = [];
+  for (const line of (text || "").split("\n")) {
+    if (/^##\s/.test(line)) sections.push({ heading: line.replace(/^##\s*/, "").trim(), lines: [] });
+    else if (sections.length) sections[sections.length - 1].lines.push(line);
+    else if (!/^#\s/.test(line)) preamble.push(line);
+  }
+  return h("div", { class: "markdown" }, [
+    ...markdownBlocks(preamble),
+    ...sections.map(section => {
+      const node = h("details", { class: "markdown-section", open: isOpen(section.heading) }, [
+        h("summary", {}, [h("span", { html: icon("chevron") }), h("span", { text: section.heading })]),
+        h("div", { class: "markdown-body" }, markdownBlocks(section.lines))
+      ]);
+      if (onToggle) node.addEventListener("toggle", () => onToggle(section.heading, node.open));
+      return node;
+    })
+  ]);
+}
+
+// A unified diff from the first hunk on: added and removed lines colored, each hunk's header quiet.
+function diffView(text) {
+  const lines = (text || "").replace(/\n$/, "").split("\n");
+  const start = lines.findIndex(line => line.startsWith("@@"));
+  return h("div", { class: "diff" }, (start < 0 ? [] : lines.slice(start)).map(line => {
+    const kind = line.startsWith("@@") ? "hunk" : line[0] === "+" ? "added" : line[0] === "-" ? "removed" : "same";
+    return h("div", { class: `diff-line ${kind}` }, [
+      h("span", { class: "diff-sign", text: kind === "added" ? "+" : kind === "removed" ? "−" : "" }),
+      h("span", { text: kind === "hunk" ? line : line.slice(1) || " " })
+    ]);
+  }));
+}
+
+// ---------- choosing in order ----------
+
+// Several of a list in an order that matters: the chosen ones on top, numbered and moved with arrows, the rest under
+// them to add. items: [{ value, title, detail? }]; chosen: values in order. node.value() gives the order.
+function orderPicker({ items, chosen = [] }) {
+  let order = chosen.filter(value => items.some(item => item.value === value));
+  const node = h("div", { class: "order" });
+  const byValue = new Map(items.map(item => [item.value, item]));
+  const move = (index, by) => { const [value] = order.splice(index, 1); order.splice(index + by, 0, value); render(); };
+  const text = item => h("span", { class: "order-text" }, [h("strong", { text: item.title }), item.detail ? h("small", { text: item.detail }) : null]);
+  const render = () => {
+    const rest = items.filter(item => !order.includes(item.value));
+    fill(node,
+      order.length ? h("ol", { class: "order-list" }, order.map((value, index) => {
+        const up = tool("up", t("Move up"), () => move(index, -1), { quiet: true });
+        const down = tool("down", t("Move down"), () => move(index, 1), { quiet: true });
+        up.disabled = index === 0;
+        down.disabled = index === order.length - 1;
+        return h("li", { class: "order-item chosen" }, [
+          h("span", { class: "order-number", text: String(index + 1) }),
+          text(byValue.get(value)), up, down,
+          tool("close", t("Remove"), () => { order = order.filter(each => each !== value); render(); }, { quiet: true, danger: true })
+        ]);
+      })) : h("p", { class: "order-empty", text: t("Nothing chosen") }),
+      rest.map(item => h("button", { class: "order-item", type: "button", onclick: () => { order.push(item.value); render(); } }, [h("span", { class: "order-add", html: icon("plus") }), text(item)]))
+    );
+  };
+  node.value = () => [...order];
+  render();
+  return node;
+}
+
 // ---------- images ----------
 
 // fit: "natural" shows the image at its own ratio; "fill" crops it to a square cell so grids line up.
-function imageFrame(path, { fit = "natural", onClick = null, number = null, check = false, tools = [], lazy = true } = {}) {
+// src: an address other than the workspace file, such as a stored object.
+function imageFrame(path, { fit = "natural", onClick = null, number = null, check = false, tools = [], lazy = true, src = null } = {}) {
   return h("div", { class: ["frame", fit === "fill" && "fill", onClick && "clickable"].filter(Boolean).join(" "), onclick: onClick }, [
-    h("img", { src: fileUrl(path), alt: "", loading: lazy ? "lazy" : null }),
+    h("img", { src: src || fileUrl(path), alt: "", loading: lazy ? "lazy" : null }),
     number != null ? h("span", { class: "number", text: String(number).padStart(2, "0") }) : null,
     check ? h("span", { class: "check", html: icon("check") }) : null,
     tools.filter(Boolean).length ? h("div", { class: "tools" }, tools) : null
@@ -285,12 +415,15 @@ function toast(message, kind = "") {
 // ---------- modal ----------
 
 let settleModal = null;
+// What a dialog built from content answers with; null reads the input or the chosen choice.
+let modalRead = null;
 
 // input: "text" (one line), "long" (a paragraph), or null for a plain confirmation.
 // choices: [{ value, title, detail?, aside?, specs? }] shows a list to pick one from; specs are [label, value] pairs. Resolves to the answer, or null when cancelled.
+// content: a node of the page's own in place of choices, such as an orderPicker; result() gives the answer.
 // text: a long text to read, such as a prompt, shown wide with only the confirm button.
 // wide: a long text to edit, such as a brief, in a wide and tall box.
-function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null, wide = false }) {
+function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null, wide = false, content = null, result = null }) {
   if (text != null) input = null;
   $("modal-title").textContent = title;
   $("modal-description").textContent = description;
@@ -303,8 +436,9 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
   $("modal-input").value = value;
   $("modal-input").placeholder = placeholder;
   $("modal-input").classList.toggle("single", input === "text");
-  $("modal-choices").hidden = !choices;
-  fill($("modal-choices"), ...(choices || []).map((choice, index) => h("label", { class: "choice" }, [
+  $("modal-choices").hidden = !choices && !content;
+  modalRead = result;
+  fill($("modal-choices"), ...(content ? [content] : (choices || []).map((choice, index) => h("label", { class: "choice" }, [
     h("input", { type: "radio", name: "modal-choice", value: choice.value, checked: index === 0 }),
     h("span", {}, [
       h("strong", { text: choice.title }),
@@ -312,7 +446,7 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
       choice.specs ? specList(choice.specs) : null
     ]),
     choice.aside ? h("span", { class: "price", text: choice.aside }) : null
-  ])));
+  ]))));
   $("modal-error").textContent = error;
   $("modal-error").hidden = !error;
   $("modal-confirm").textContent = confirm;
@@ -330,6 +464,7 @@ function closeModal(result) {
 }
 
 function modalResult() {
+  if (modalRead) return modalRead();
   if (!$("modal-choices").hidden) {
     const chosen = $("modal-choices").querySelector("input:checked");
     return chosen ? chosen.value : null;
