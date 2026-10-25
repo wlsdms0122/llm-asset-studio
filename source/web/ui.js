@@ -425,15 +425,13 @@ let modalRead = null;
 // choices: [{ value, title, detail?, aside?, specs? }] shows a list to pick one from; specs are [label, value] pairs. Resolves to the answer, or null when cancelled.
 // content: a node of the page's own in place of choices, such as an orderPicker; result() gives the answer.
 // text: a long text to read, such as a prompt, shown wide with only the confirm button.
-// wide: a long text to edit, such as a brief, in a wide and tall box.
-function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null, wide = false, content = null, result = null }) {
+function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null, content = null, result = null }) {
   if (text != null) input = null;
   $("modal-title").textContent = title;
   $("modal-description").textContent = description;
   $("modal-document").hidden = text == null;
   $("modal-document").textContent = text || "";
-  $("modal-form").classList.toggle("wide", text != null || wide);
-  $("modal-form").classList.toggle("editing", wide);
+  $("modal-form").classList.toggle("wide", text != null);
   $("modal-cancel").hidden = text != null;
   $("modal-input").hidden = !input;
   $("modal-input").value = value;

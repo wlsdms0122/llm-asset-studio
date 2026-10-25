@@ -76,9 +76,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .panel-head .subtitle a { color: inherit; }
 .panel-doc .section-title { margin-bottom: var(--space-3); }
 /* style.md and a brief are prose, often Korean, which a monospaced font spaces apart. */
-.panel-doc .document { font: var(--text-sm)/1.65 var(--sans); color: var(--fg); }
-.panel-brief { max-height: 240px; overflow-y: auto; font: var(--text-sm)/1.6 var(--sans); padding: var(--space-3) 14px; border-radius: var(--radius-md); background: var(--surface-sunken); }
+.panel-doc .markdown { font-size: var(--text-sm); line-height: 1.65; }
+.panel-brief { max-height: 320px; overflow-y: auto; padding: var(--space-3) 14px; border-radius: var(--radius-md); background: var(--surface-sunken); }
+.panel-brief .markdown { font-size: var(--text-sm); line-height: 1.6; }
+.panel-brief .markdown > :last-child, .panel-brief .markdown-body > :last-child { margin-bottom: 0; }
 .panel-hint { margin: 0; font-size: var(--text-sm); }
+.panel-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
 
 /* The stage scrolls under the composer, which floats over its bottom edge as wide as the stage's content.
    Behind the composer's upper half the stage shows through; under its lower half the page's background
@@ -130,11 +133,16 @@ body.resizing { cursor: col-resize; user-select: none; }
 .canvas-frames, .canvas-nodes { position: absolute; left: 0; top: 0; }
 .canvas-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .edge { fill: none; stroke: color-mix(in srgb, var(--fg-faint) 70%, transparent); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.edge-end { fill: var(--surface); stroke: var(--fg-faint); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.edge.on, .edge-end.on { stroke: var(--accent); }
-.canvas-frame { position: absolute; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--surface) 45%, transparent); }
+.edge.on { stroke: var(--accent); }
+/* A frame is a group: dragging it moves its nodes, so it shows it can be grabbed. */
+.canvas-frame { position: absolute; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--surface) 45%, transparent); cursor: grab; transition: border-color .15s, background-color .15s; }
+.canvas-frame:hover { border-color: var(--fg-faint); }
+.canvas-frame.selected { border-style: solid; border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+.canvas-frame-head { position: absolute; top: 4px; left: 12px; right: 6px; display: flex; align-items: center; gap: 4px; }
 /* The title keeps its screen size down to half zoom, so a frame stays labeled when the canvas is zoomed out. */
-.canvas-frame-title { position: absolute; top: 8px; left: 16px; right: 16px; overflow: hidden; color: var(--fg-muted); font-size: calc(var(--text-sm) / max(var(--zoom, 1), .5)); font-weight: 700; line-height: 1.3; white-space: nowrap; text-overflow: ellipsis; }
+.canvas-frame-title { flex: 1; min-width: 0; overflow: hidden; color: var(--fg-muted); font-size: calc(var(--text-sm) / max(var(--zoom, 1), .5)); font-weight: 700; line-height: 1.3; white-space: nowrap; text-overflow: ellipsis; }
+.canvas-frame-head .tool { flex: none; width: 28px; height: 28px; opacity: 0; transition: opacity .15s; }
+.canvas-frame:hover .canvas-frame-head .tool, .canvas-frame.selected .canvas-frame-head .tool { opacity: 1; }
 .canvas-empty { position: absolute; inset: 0 0 160px; display: grid; place-items: center; padding: var(--space-6); pointer-events: none; }
 .canvas-empty .empty { background: var(--surface); }
 .canvas-tools { position: absolute; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -145,9 +153,10 @@ body.resizing { cursor: col-resize; user-select: none; }
 #board .dock { background: none; pointer-events: none; }
 #board .dock > .composer { pointer-events: auto; box-shadow: var(--shadow-md); }
 
-/* a node: what was asked on top, what came out under it, the agent's note, and the facts at the bottom */
+/* a node: what it builds on and what was asked on top, what came out under it; the rest is in the inspector */
 .canvas-node { position: absolute; width: 304px; display: flex; flex-direction: column; gap: 10px; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; transition: border-color .15s, box-shadow .15s; }
 .canvas-node:hover { border-color: var(--line-strong); box-shadow: var(--shadow-md); }
+.canvas-node.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md); }
 .canvas-node.dragging { z-index: 2; cursor: grabbing; box-shadow: var(--shadow-lg); }
 .canvas-node.flash { animation: flash 1.8s var(--ease); }
 @keyframes flash { 0%, 50% { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-md); } }
@@ -159,25 +168,32 @@ body.resizing { cursor: col-resize; user-select: none; }
 .node-style { min-width: 0; overflow: hidden; color: var(--fg-faint); white-space: nowrap; text-overflow: ellipsis; text-decoration: none; }
 .node-style:hover { color: var(--fg); text-decoration: underline; }
 .node-request { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--text-md); font-weight: 600; line-height: 1.5; white-space: pre-line; word-break: break-word; }
+.node-from { display: flex; flex-wrap: wrap; gap: 6px; }
+.node-parent { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunken); color: var(--fg-muted); font: 600 var(--text-xs) var(--mono); cursor: pointer; }
+.node-parent:hover { border-color: var(--line-strong); color: var(--fg); }
+.node-parent img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
 .node-images { display: grid; gap: var(--space-2); }
 .node-images.several { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .node-image { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 6px; min-width: 0; }
 .node-image .frame { cursor: pointer; }
 .node-image .frame .tools { top: 6px; right: 6px; gap: 4px; }
 .node-image .frame .tool { width: 28px; height: 28px; }
-.review { display: flex; align-items: flex-start; gap: 6px; color: var(--fg-muted); font-size: var(--text-xs); line-height: 1.45; }
-.review .pill { flex: none; }
-.review span:last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-/* Two images side by side leave too little room for the verdict and its words on one line. */
-.node-images.several .review { flex-direction: column; gap: 2px; }
-.node-note { margin: 0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; padding: var(--space-2) 10px; border-radius: var(--radius-md); background: var(--surface-sunken); font-size: var(--text-sm); line-height: 1.55; white-space: pre-wrap; word-break: break-word; cursor: pointer; }
-.node-note.open { display: block; }
 .node-error { margin: 0; color: var(--danger); font-size: var(--text-sm); }
-.node-reveal { align-self: flex-start; }
-.node-foot { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--fg-faint); font-size: var(--text-xs); }
-.node-foot span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.node-foot span:last-child { white-space: nowrap; }
-.node-foot a { color: var(--fg-muted); white-space: nowrap; }
+
+/* the inspector: everything about the selected nodes, over the canvas's right side above the composer */
+.inspector { position: absolute; z-index: 4; top: 64px; right: var(--space-4); width: 340px; max-height: calc(100% - 64px - var(--dock, 0px) - var(--space-4)); display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-lg); }
+.inspector[hidden] { display: none; }
+.inspector-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.inspector-head .grow { flex: 1; }
+.inspector-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.inspector-section h3 { margin: 0; color: var(--fg-faint); font-size: var(--text-xs); font-weight: 700; }
+.inspector-text { margin: 0; font-size: var(--text-sm); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.inspector-numbered { display: flex; align-items: flex-start; gap: var(--space-2); }
+.inspector-number { flex: none; min-width: 26px; color: var(--fg-faint); font: 700 var(--text-xs)/1.9 var(--mono); }
+.inspector-reviews { display: flex; flex-direction: column; gap: var(--space-2); }
+.inspector .button { align-self: flex-start; }
+.review { display: flex; align-items: flex-start; gap: 6px; color: var(--fg-muted); font-size: var(--text-sm); line-height: 1.55; }
+.review .pill { flex: none; }
 
 /* ---------- lightbox ---------- */
 
@@ -219,6 +235,7 @@ body.resizing { cursor: col-resize; user-select: none; }
   .stage-inner { padding: var(--space-5) var(--space-4) var(--space-8); }
   .board-stage { order: 1; height: 70vh; }
   #board .dock { position: absolute; padding: 0 var(--space-3) var(--space-3); }
+  .inspector { top: auto; bottom: calc(var(--dock, 0px) + var(--space-3)); right: var(--space-3); left: var(--space-3); width: auto; max-height: 50%; }
   .candidates { margin-left: 0; }
   .lightbox { grid-template-columns: 1fr; }
   .lightbox-info { display: none; }

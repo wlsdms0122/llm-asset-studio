@@ -91,6 +91,8 @@
 .probe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-4); }
 .probe { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; }
 .probe figcaption { font-size: var(--text-sm); line-height: 1.45; }
+.probe .review { font-size: var(--text-xs); line-height: 1.45; }
+.probe .review span:last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .probe-pending { aspect-ratio: 1; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--surface-sunken); }
 .probe-pending.live { background: linear-gradient(110deg, var(--canvas) 30%, var(--surface-sunken) 50%, var(--canvas) 70%) 0 0 / 200% 100%; animation: shimmer 1.4s linear infinite; }
 

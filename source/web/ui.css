@@ -243,7 +243,6 @@ svg.icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentCol
 .modal-description:empty { display: none; }
 .modal-box textarea { height: 112px; }
 .modal-box textarea.single { height: 46px; max-height: 160px; }
-.modal-box.editing textarea { height: min(56vh, 520px); font: 13px/1.7 var(--mono); }
 .field-error { margin: -4px 0 0; color: var(--danger); font-size: var(--text-sm); }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-1); }
 .modal-choices { display: flex; flex-direction: column; gap: 6px; max-height: 380px; overflow-y: auto; }

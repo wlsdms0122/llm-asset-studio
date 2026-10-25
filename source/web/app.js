@@ -16,7 +16,7 @@ const inProject = (project, path) => `projects/${project}/${path}`;
 const objectUrl = name => `/object/${name}`;
 const TOOL_NAMES = { cutout: t("Background removal") };
 const KIND_NAMES = { generation: t("Generation"), tool: t("Tool"), upload: t("Upload") };
-const THREAD_NAMES = { style: t("Style thread"), ideation: t("Ideation") };
+const THREAD_NAMES = { project: t("Brief thread"), style: t("Style thread"), ideation: t("Ideation") };
 
 function when(time) {
   if (!time) return "";
@@ -337,7 +337,6 @@ function nodeImageItem(project, node, image, styles = null) {
     info: [
       [t("Request"), node.request],
       [t("Agent's note"), image.description || node.note],
-      [t("Review"), image.review ? reviewLine(image.review) : null],
       [t("Style"), node.style && (node.revision ? t("{style} at revision {revision}", { style: node.style, revision: node.revision }) : node.style)],
       made,
       [t("References used"), used],
@@ -490,17 +489,20 @@ function renderThreadPanel(at, data) {
   fill($("thread-head"), ...panelHead({
     back: [at.project, hashes.project(at.project)],
     title: threadTitle(data),
-    subtitle: [THREAD_NAMES[data.kind], " · ", h("a", { href: hashes.style(at.project, data.style), text: data.style }), ` · ${t("started {when}", { when: when(data.started) })}`],
+    subtitle: [THREAD_NAMES[data.kind], data.style ? [" · ", h("a", { href: hashes.style(at.project, data.style), text: data.style })] : null, ` · ${t("started {when}", { when: when(data.started) })}`].flat().filter(Boolean),
     menu: [
       { label: t("Rename"), onClick: () => renameThread(at, data) },
       { label: t("Delete"), danger: true, onClick: () => deleteThread(at) }
     ]
   }));
-  // A style thread shows style.md as the agent showed it in the latest round; an ideation shows the brief as it is now.
-  const text = ideation ? data.brief : latest && latest.spec;
+  // A style thread shows style.md as the agent showed it in the latest round; the project and ideation threads show
+  // their brief as it is now.
+  const style = data.kind === "style";
+  const text = style ? latest && latest.spec : data.brief;
+  const empty = { project: t("The agent writes the project's brief here as you talk."), style: t("The agent writes the style here as you talk."), ideation: t("The agent writes the brief here as the image takes shape.") };
   fill($("thread-doc"),
-    sectionTitle(ideation ? t("Brief") : t("Style"), !ideation && latest ? t("As shown in round {round}", { round: latest.round }) : null),
-    text ? h("pre", { class: "document", text }) : h("p", { class: "muted", text: ideation ? t("The agent writes the brief here as the image takes shape.") : t("The agent writes the style here as you talk.") })
+    sectionTitle(style ? t("Style") : t("Brief"), style && latest ? t("As shown in round {round}", { round: latest.round }) : null),
+    text && text.trim() ? markdownView(text) : h("p", { class: "muted", text: empty[data.kind] })
   );
   const open = openRound();
   fill($("thread-actions"), ideation ? button(t("Draw it"), {
@@ -636,7 +638,7 @@ function renderThreadDock(at) {
   if (!conversation.composer || conversation.composer.key !== draft.key) {
     conversation.composer = composer({
       value: draft.comment,
-      placeholder: conversation.data.kind === "ideation" ? t("e.g. An app icon, but I don't know what to draw yet") : t("e.g. A little softer and simpler"),
+      placeholder: { project: t("e.g. Icons for a budgeting app for people in their twenties"), style: t("e.g. A little softer and simpler"), ideation: t("e.g. An app icon, but I don't know what to draw yet") }[conversation.data.kind],
       sendTitle: `${t("Send")} (⌘↵)`,
       onInput: value => { draft.comment = value; syncAnswer(at); },
       onSend: event => answer(at, null, event.currentTarget),

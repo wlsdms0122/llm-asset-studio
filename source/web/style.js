@@ -190,7 +190,7 @@
   const TAB_DATA = {
     rules: ["spec", "effective", "extends"],
     proposals: ["proposals", "runs", "probes", "model", "guide", "current"],
-    probes: ["probes", "probes_text", "runs", "model", "probes_stale"],
+    probes: ["probes", "runs", "model", "probes_stale"],
     references: ["references", "drawn_with", "set_check", "extends"],
     models: ["models", "model", "prompting", "drawn_with"],
     revisions: ["revisions", "current"],
@@ -300,7 +300,7 @@
           chip(t("Effective style"), { on: effective, onClick: () => { state.view = "effective"; render(); } })
         ]) : null,
         h("span", { class: "grow" }),
-        button(t("Edit"), { small: true, iconName: "pencil", onClick: () => editFile("style.md", data.spec, t("Edit the rules"), t("style.md: the style in words, in sections. Saving records a revision.")) })
+        button(t("Change in conversation"), { small: true, iconName: "memo", onClick: newConversation })
       ]),
       effective ? h("p", { class: "style-hint", text: t("What it draws with: the sections of the styles it builds on, in order, then its own. A later section replaces one of the same name; Never and Checks add up.") }) : null,
       text && text.trim()
@@ -310,15 +310,6 @@
         })])
         : emptyState({ text: t("No rules yet. The agent writes them in the style's thread.") })
     ];
-  }
-
-  async function editFile(file, value, title, description) {
-    const text = await ask({ title, description, value, confirm: t("Save"), wide: true });
-    if (text == null || text === value.trim()) return;
-    await act(async () => {
-      const saved = await api("/api/styles/edit", body({ file, text }));
-      toast(t("Saved as revision {revision}", { revision: saved.revision }));
-    });
   }
 
   // ---------- proposals ----------
@@ -498,7 +489,7 @@
     const runs = [...data.runs].reverse();
     return [
       h("section", { class: "style-card" }, [
-        sectionTitle(t("Probe requests"), button(t("Edit"), { small: true, variant: "ghost", iconName: "pencil", onClick: () => editFile("probes.md", data.probes_text, t("Edit the probes"), t("One request per line, each starting with \"- \". Six to eight across the style's range, kept the same so runs compare.")) })),
+        sectionTitle(t("Probe requests"), button(t("Change in conversation"), { small: true, variant: "ghost", iconName: "memo", onClick: newConversation })),
         data.probes.length
           ? h("ol", { class: "style-probes" }, data.probes.map(text => h("li", { text })))
           : h("p", { class: "muted", text: t("No probes yet. The agent writes them when the words hold.") }),
