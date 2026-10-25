@@ -376,7 +376,7 @@ function dropdown({ value, options, onChange, title = null }) {
   node.addEventListener("click", event => {
     event.stopPropagation();
     const box = node.getBoundingClientRect();
-    openMenu({ x: box.left, y: box.bottom + 4, width: box.width }, options.map(option => ({
+    openMenu({ x: box.left, y: box.bottom + 4, above: box.top - 4, width: box.width }, options.map(option => ({
       label: option.label, detail: option.detail, checked: option.value === value,
       onClick: () => { if (option.value !== value) onChange(option.value); }
     })));
@@ -384,7 +384,8 @@ function dropdown({ value, options, onChange, title = null }) {
   return node;
 }
 
-// items: [{ label, detail?, onClick, danger?, checked? }] (null entries skipped). at: { x, y, width? } in viewport pixels.
+// items: [{ label, detail?, onClick, danger?, checked? }] (null entries skipped). at: { x, y, width?, above? } in viewport
+// pixels; above is the trigger's top, for opening upward.
 function openMenu(at, items) {
   const menu = $("menu");
   const checking = items.some(item => item && item.checked != null);
@@ -396,7 +397,9 @@ function openMenu(at, items) {
   menu.hidden = false;
   const box = menu.getBoundingClientRect();
   menu.style.left = `${Math.min(at.x, innerWidth - box.width - 8)}px`;
-  menu.style.top = `${Math.min(at.y, innerHeight - box.height - 8)}px`;
+  // A menu that does not fit under its trigger opens above it when the trigger says where its top is.
+  const below = at.y + box.height <= innerHeight - 8;
+  menu.style.top = `${below || at.above == null ? Math.min(at.y, innerHeight - box.height - 8) : Math.max(8, at.above - box.height)}px`;
 }
 
 function closeMenu() { $("menu").hidden = true; }

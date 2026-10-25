@@ -37,6 +37,7 @@
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-4); }
 .grid + .section-title { margin-top: 36px; }
 .section-title a { text-decoration: none; }
+#archive-grid .section-title > a { color: var(--fg); font-size: var(--text-md); font-weight: 700; }
 .section-title a:hover { text-decoration: underline; }
 .tile { margin: 0; min-width: 0; }
 #archive-grid:not(.selecting) .tile .check { display: none; }
@@ -74,6 +75,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .panel-actions:empty { display: none; }
 .panel-head .subtitle a { color: inherit; }
 .panel-doc .section-title { margin-bottom: var(--space-3); }
+/* style.md and a brief are prose, often Korean, which a monospaced font spaces apart. */
+.panel-doc .document { font: var(--text-sm)/1.65 var(--sans); color: var(--fg); }
 .panel-brief { max-height: 240px; overflow-y: auto; font: var(--text-sm)/1.6 var(--sans); padding: var(--space-3) 14px; border-radius: var(--radius-md); background: var(--surface-sunken); }
 .panel-hint { margin: 0; font-size: var(--text-sm); }
 
@@ -126,11 +129,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 .canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .canvas-frames, .canvas-nodes { position: absolute; left: 0; top: 0; }
 .canvas-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.edge { fill: none; stroke: var(--line-strong); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.edge-end { fill: var(--surface); stroke: var(--line-strong); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.edge { fill: none; stroke: color-mix(in srgb, var(--fg-faint) 70%, transparent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.edge-end { fill: var(--surface); stroke: var(--fg-faint); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .edge.on, .edge-end.on { stroke: var(--accent); }
 .canvas-frame { position: absolute; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--surface) 45%, transparent); }
-.canvas-frame-title { position: absolute; top: 8px; left: 16px; right: 16px; overflow: hidden; color: var(--fg-muted); font-size: var(--text-sm); font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+/* The title keeps its screen size down to half zoom, so a frame stays labeled when the canvas is zoomed out. */
+.canvas-frame-title { position: absolute; top: 8px; left: 16px; right: 16px; overflow: hidden; color: var(--fg-muted); font-size: calc(var(--text-sm) / max(var(--zoom, 1), .5)); font-weight: 700; line-height: 1.3; white-space: nowrap; text-overflow: ellipsis; }
 .canvas-empty { position: absolute; inset: 0 0 160px; display: grid; place-items: center; padding: var(--space-6); pointer-events: none; }
 .canvas-empty .empty { background: var(--surface); }
 .canvas-tools { position: absolute; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -138,8 +142,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .canvas-tools.top-right { top: var(--space-4); right: var(--space-4); }
 .canvas-tools > .button:not(.small) { height: var(--control-sm); padding: 0 var(--space-3); font-size: var(--text-sm); }
 .canvas-zoom { min-width: 56px; font-variant-numeric: tabular-nums; }
-.board .dock { background: none; pointer-events: none; }
-.board .dock > .composer { pointer-events: auto; box-shadow: var(--shadow-md); }
+#board .dock { background: none; pointer-events: none; }
+#board .dock > .composer { pointer-events: auto; box-shadow: var(--shadow-md); }
 
 /* a node: what was asked on top, what came out under it, the agent's note, and the facts at the bottom */
 .canvas-node { position: absolute; width: 304px; display: flex; flex-direction: column; gap: 10px; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); cursor: grab; transition: border-color .15s, box-shadow .15s; }
@@ -157,13 +161,15 @@ body.resizing { cursor: col-resize; user-select: none; }
 .node-request { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--text-md); font-weight: 600; line-height: 1.5; white-space: pre-line; word-break: break-word; }
 .node-images { display: grid; gap: var(--space-2); }
 .node-images.several { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.node-image { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.node-image { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 6px; min-width: 0; }
 .node-image .frame { cursor: pointer; }
 .node-image .frame .tools { top: 6px; right: 6px; gap: 4px; }
 .node-image .frame .tool { width: 28px; height: 28px; }
 .review { display: flex; align-items: flex-start; gap: 6px; color: var(--fg-muted); font-size: var(--text-xs); line-height: 1.45; }
 .review .pill { flex: none; }
 .review span:last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Two images side by side leave too little room for the verdict and its words on one line. */
+.node-images.several .review { flex-direction: column; gap: 2px; }
 .node-note { margin: 0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; padding: var(--space-2) 10px; border-radius: var(--radius-md); background: var(--surface-sunken); font-size: var(--text-sm); line-height: 1.55; white-space: pre-wrap; word-break: break-word; cursor: pointer; }
 .node-note.open { display: block; }
 .node-error { margin: 0; color: var(--danger); font-size: var(--text-sm); }
@@ -201,6 +207,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 @media (max-width: 900px) {
   .appbar { gap: var(--space-3); padding: 0 var(--space-4); }
+  .nav a { white-space: nowrap; }
   .page { padding: var(--space-6) var(--space-4) 48px; }
   .workspace { grid-template-columns: 1fr; height: auto; }
   .panel { order: 2; border-right: 0; border-top: 1px solid var(--line); }
@@ -211,9 +218,20 @@ body.resizing { cursor: col-resize; user-select: none; }
   .stage { overflow: visible; }
   .stage-inner { padding: var(--space-5) var(--space-4) var(--space-8); }
   .board-stage { order: 1; height: 70vh; }
-  .board .dock { position: absolute; padding: 0 var(--space-3) var(--space-3); }
+  #board .dock { position: absolute; padding: 0 var(--space-3) var(--space-3); }
   .candidates { margin-left: 0; }
   .lightbox { grid-template-columns: 1fr; }
   .lightbox-info { display: none; }
   .lightbox-stage { padding: var(--space-4) 56px; }
+}
+
+/* A phone keeps the app bar on one line: the brand shows its mark only and the agent pill its dot, with the words in its title. */
+@media (max-width: 600px) {
+  .appbar { gap: var(--space-2); padding: 0 var(--space-3); }
+  .brand { font-size: 0; gap: 0; }
+  .nav a { padding: 6px 8px; }
+  .presence { margin-right: 0; }
+  .presence .pill { font-size: 0; gap: 0; padding: 0 9px; }
+  .appbar-actions #new-project { margin-left: var(--space-1); }
+  .grid, .candidates { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 }

@@ -351,8 +351,9 @@ const home = { signature: null };
 
 page("home", {
   enter() { home.signature = null; document.title = `${t("Projects")} · Asset Studio`; },
-  async load() {
+  async load(at) {
     const next = await api("/api/projects");
+    if (at !== route) return;
     const signature = signatureOf(next);
     if (signature === home.signature && $("home")) return;
     home.signature = signature;
@@ -419,12 +420,13 @@ async function deleteProject(project) {
 // ---------- thread page ----------
 
 // The conversation lives as long as the page; the composer and its draft live as long as the round they answer.
-const conversation = { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false };
+const conversation = { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false, sending: false };
 
 page("thread", {
-  enter() { Object.assign(conversation, { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false }); },
+  enter() { Object.assign(conversation, { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false, sending: false }); },
   async load(at) {
     const next = await api(`/api/thread?project=${encode(at.project)}&thread=${encode(at.thread)}`);
+    if (at !== route) return;
     const signature = signatureOf(next);
     if (signature === conversation.signature) return;
     conversation.signature = signature;
@@ -654,7 +656,7 @@ function syncAnswer(at) {
     })),
     ...open.attachments.map(path => ({ key: `attachment|${path}`, node: thumb(inProject(at.project, path), { remove: () => detach(at, path) }) }))
   ]);
-  box.send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !open.attachments.length;
+  box.send.disabled = conversation.sending || (!draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !open.attachments.length);
 }
 
 async function attach(at, files) {
@@ -672,8 +674,9 @@ async function detach(at, path) {
 
 async function answer(at, decision, trigger) {
   const open = openRound();
-  if (!open) return;
+  if (!open || conversation.sending) return;
   const draft = conversation.draft;
+  conversation.sending = true;
   if (trigger) trigger.disabled = true;
   try {
     const feedback = await api("/api/threads/answer", {
@@ -681,10 +684,13 @@ async function answer(at, decision, trigger) {
       picked: [...draft.picked], notes: draft.notes, comment: draft.comment
     });
     if (feedback.node) toast(t("Added {node} to the canvas", { node: feedback.node }));
+    conversation.sending = false;
     await load();
   } catch (error) {
     toast(error.message, "error");
+    conversation.sending = false;
     if (trigger) trigger.disabled = false;
+    syncAnswer(at);
   }
 }
 
@@ -694,8 +700,9 @@ const archive = { signature: null, data: null, selecting: null };
 
 page("archive", {
   enter() { Object.assign(archive, { signature: null, data: null, selecting: null }); document.title = `${t("Archive")} · Asset Studio`; },
-  async load() {
+  async load(at) {
     const next = await api("/api/archive");
+    if (at !== route) return;
     const signature = JSON.stringify(next);
     if (signature === archive.signature && $("archive-page")) return;
     archive.signature = signature;

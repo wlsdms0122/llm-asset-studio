@@ -11,8 +11,12 @@ const GAP_Y = 32;
 const FRAME_PAD = 24;
 const FRAME_HEAD = 32;
 const FRAME_GAP = 64;
+const PORT_INSET = 12;
 const GRID_COLUMNS = 4;
 const ZOOM_RANGE = [0.15, 2];
+// The least zoom a canvas opens at, and the room left around fitted content (the top clears the canvas tools).
+const FIRST_ZOOM = 0.5;
+const FIT_MARGIN = { side: 48, top: 72, bottom: 24 };
 
 const board = {};
 
@@ -21,7 +25,7 @@ function resetBoard(project) {
     project, data: null, canvasSignature: null, panelSignature: null, stylesSignature: null,
     view: null, cards: new Map(), sizes: new Map(), geometry: new Map(), positions: {}, saved: {},
     saveTimer: null, saving: false, viewTimer: null,
-    selected: new Set(), draft: { text: "", attachments: [], style: null }, composer: null,
+    selected: new Set(), draft: { text: "", attachments: [], style: null }, composer: null, sending: false,
     focus: null, spaceHeld: false, frame: null, dragging: null
   });
 }
@@ -32,9 +36,11 @@ page("project", {
     board.focus = at.params.node || null;
     window.addEventListener("keydown", boardKeys);
     window.addEventListener("keyup", boardKeys);
+    window.addEventListener("blur", boardKeys);
   },
   async load(at) {
     const next = await api(`/api/project?project=${encode(at.project)}`);
+    if (at !== route) return;
     if (!$("board")) buildBoard(at);
     board.data = next;
     document.title = `${next.name} · Asset Studio`;
@@ -51,6 +57,7 @@ page("project", {
   leave() {
     window.removeEventListener("keydown", boardKeys);
     window.removeEventListener("keyup", boardKeys);
+    window.removeEventListener("blur", boardKeys);
     if (board.saveTimer) { clearTimeout(board.saveTimer); savePositions(); }
     board.draft.attachments.forEach(item => URL.revokeObjectURL(item.url));
   }
@@ -63,7 +70,8 @@ function buildBoard(at) {
     h("div", { class: "canvas-world", id: "canvas-world" }, [
       h("div", { class: "canvas-frames", id: "canvas-frames" }),
       svgNode("svg", { class: "canvas-edges", id: "canvas-edges", width: 1, height: 1 }),
-      h("div", { class: "canvas-nodes", id: "canvas-nodes" })
+      h("div", { class: "canvas-nodes", id: "canvas-nodes" }),
+      svgNode("svg", { class: "canvas-edges", id: "canvas-ports", width: 1, height: 1 })
     ]),
     h("div", { class: "canvas-empty", id: "canvas-empty", hidden: true }, [emptyState({ title: t("Nothing on the canvas yet"), text: t("Write what to draw below, or upload images.") })]),
     h("div", { class: "canvas-tools top-left" }, [
@@ -124,10 +132,10 @@ function renderPanel() {
     sectionTitle(t("Styles"), data.styles.length ? String(data.styles.length) : null),
     data.styles.length ? rowList(data.styles.map(style => listRow({
       title: style.name,
-      detail: style.blocked && !style.guide ? blockedReason(style) : style.purpose || null,
+      detail: style.missing && !style.guide ? blockedReason(style) : style.purpose || null,
       onClick: () => { location.hash = hashes.style(project, style.name); },
       aside: h("div", { class: "row" }, [
-        style.guide ? pill(t("Guide"), { small: true }) : style.blocked ? pill(t("Cannot draw yet"), { small: true }) : null,
+        style.guide ? pill(t("Guide"), { small: true }) : style.missing ? pill(t("Cannot draw yet"), { small: true }) : null,
         style.proposals ? pill(tn("{count} proposal", "{count} proposals", style.proposals), { tone: "accent", small: true }) : null
       ])
     }))) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
@@ -154,7 +162,7 @@ function renderPanel() {
   );
 }
 
-const drawableStyles = () => board.data.styles.filter(style => !style.blocked);
+const drawableStyles = () => board.data.styles.filter(style => style.missing == null);
 
 async function editBrief() {
   const text = await ask({ title: t("Brief"), description: t("What the images are for, where they are seen, who sees them, and the decisions every style here keeps."), value: board.data.brief, confirm: t("Save"), wide: true });
@@ -242,7 +250,7 @@ function nodeCard(node) {
       statusPill(node),
       tool("more", t("More"), event => openNodeMenu(node, event), { quiet: true })
     ]),
-    node.request ? h("p", { class: "node-request", text: node.request, title: node.request }) : null,
+    node.request ? h("p", { class: "node-request", text: node.request.replace(/\n\s*\n+/g, "\n"), title: node.request }) : null,
     attachments.length ? h("div", { class: "thumbs" }, attachments.map((path, index, all) => thumb(inProject(project, path), {
       small: true, title: t("Attachment"), onClick: () => openLightbox(all.map(each => ({ path: inProject(project, each), info: [] })), index)
     }))) : null,
@@ -447,15 +455,15 @@ function lineageLayout(nodes, frames, known) {
   return positions;
 }
 
-// Where each image sits inside its card, for the edges that leave from it.
+// Where each image sits inside its card, for the edges that leave from it. Offsets ignore transforms, so a card still
+// moving in with .enter, or a zoom in progress, measures where it comes to rest; the frame's offset parent is the card.
 function measureImages() {
   board.geometry = new Map();
-  const zoom = board.view ? board.view.zoom : 1;
   for (const [id, card] of board.cards) {
-    const box = card.element.getBoundingClientRect();
+    const border = card.element.clientLeft;
     card.element.querySelectorAll(".node-image").forEach(image => {
-      const frame = image.querySelector(".frame").getBoundingClientRect();
-      board.geometry.set(image.dataset.path, { id, x: (frame.left - box.left) / zoom, y: (frame.top - box.top) / zoom, width: frame.width / zoom, height: frame.height / zoom });
+      const frame = image.querySelector(".frame");
+      board.geometry.set(image.dataset.path, { id, x: frame.offsetLeft + border, y: frame.offsetTop + border, width: frame.offsetWidth, height: frame.offsetHeight });
     });
   }
 }
@@ -479,9 +487,11 @@ function drawFrames() {
   fill($("canvas-frames"), frames);
 }
 
-// An edge leaves the right side of the parent image and enters the child card beside its head.
+// An edge leaves a port on the parent image's right side and enters the child card beside its head. The edges run
+// under the cards; the ports are drawn over them, inside the image, so an image in the left column shows its edge too.
 function drawEdges() {
   const paths = [];
+  const ports = new Map();
   for (const node of board.data.nodes) {
     if (!board.positions[node.id]) continue;
     const target = rectOf(node.id);
@@ -490,15 +500,16 @@ function drawEdges() {
       if (!board.positions[id] || id === node.id) continue;
       const source = rectOf(id);
       const image = board.geometry.get(parent);
-      const [sx, sy] = image ? [source.x + image.x + image.width, source.y + image.y + image.height / 2] : [source.right, source.y + 24];
+      const [sx, sy] = image ? [source.x + image.x + image.width - PORT_INSET, source.y + image.y + image.height / 2] : [source.right, source.y + 24];
       const [tx, ty] = [target.x, target.y + 24];
       const bend = Math.max(48, Math.abs(tx - sx) / 2);
       const selected = board.selected.has(parent);
       paths.push(svgNode("path", { class: `edge${selected ? " on" : ""}`, d: `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}` }));
-      paths.push(svgNode("circle", { class: `edge-end${selected ? " on" : ""}`, cx: sx, cy: sy, r: 4 }));
+      ports.set(parent, svgNode("circle", { class: `edge-end${selected ? " on" : ""}`, cx: sx, cy: sy, r: 5 }));
     }
   }
   $("canvas-edges").replaceChildren(...paths);
+  $("canvas-ports").replaceChildren(...ports.values());
 }
 
 // ---------- viewport: pan and zoom ----------
@@ -509,12 +520,10 @@ function startView() {
   try { const saved = JSON.parse(localStorage.getItem(viewKey())); if (saved && saved.zoom) { board.view = saved; return applyView(); } } catch {}
   board.view = { x: 0, y: 0, zoom: 1 };
   fitView();
-  // A first look stays readable: a canvas too tall to fit opens at its top instead of shrinking to a thumbnail.
-  if (board.view.zoom < 0.5) {
-    const rects = Object.keys(board.positions).map(rectOf);
-    const left = Math.min(...rects.map(rect => rect.x)) - FRAME_PAD;
-    const top = Math.min(...rects.map(rect => rect.y)) - FRAME_PAD - FRAME_HEAD;
-    board.view = { x: 48 - left * 0.5, y: 24 - top * 0.5, zoom: 0.5 };
+  // A first look stays readable: a canvas too large to fit opens at its top left instead of shrinking to a thumbnail.
+  if (board.view.zoom < FIRST_ZOOM) {
+    const { left, top } = contentBounds();
+    board.view = { x: FIT_MARGIN.side - left * FIRST_ZOOM, y: FIT_MARGIN.top - top * FIRST_ZOOM, zoom: FIRST_ZOOM };
     applyView();
   }
 }
@@ -544,19 +553,21 @@ function zoomBy(factor, at = null) {
 // The part of the viewport the composer does not cover.
 const visibleHeight = () => $("canvas-viewport").clientHeight - $("board-dock").offsetHeight;
 
-function fitView() {
-  const ids = Object.keys(board.positions);
-  if (!ids.length) { board.view = { x: 48, y: 48, zoom: 1 }; return applyView(); }
-  const rects = [...ids.map(rectOf), ...[...$("canvas-frames").children].map(frame => ({ x: frame.offsetLeft, y: frame.offsetTop, right: frame.offsetLeft + frame.offsetWidth, bottom: frame.offsetTop + frame.offsetHeight }))];
+// The cards and frames together, in world coordinates.
+function contentBounds() {
+  const rects = [...Object.keys(board.positions).map(rectOf), ...[...$("canvas-frames").children].map(frame => ({ x: frame.offsetLeft, y: frame.offsetTop, right: frame.offsetLeft + frame.offsetWidth, bottom: frame.offsetTop + frame.offsetHeight }))];
   const left = Math.min(...rects.map(rect => rect.x));
   const top = Math.min(...rects.map(rect => rect.y));
-  const width = Math.max(...rects.map(rect => rect.right)) - left;
-  const height = Math.max(...rects.map(rect => rect.bottom)) - top;
-  const margin = 48;
-  const availableWidth = $("canvas-viewport").clientWidth - margin * 2;
-  const availableHeight = visibleHeight() - margin * 2;
+  return { left, top, width: Math.max(...rects.map(rect => rect.right)) - left, height: Math.max(...rects.map(rect => rect.bottom)) - top };
+}
+
+function fitView() {
+  if (!Object.keys(board.positions).length) { board.view = { x: FIT_MARGIN.side, y: FIT_MARGIN.top, zoom: 1 }; return applyView(); }
+  const { left, top, width, height } = contentBounds();
+  const availableWidth = $("canvas-viewport").clientWidth - FIT_MARGIN.side * 2;
+  const availableHeight = visibleHeight() - FIT_MARGIN.top - FIT_MARGIN.bottom;
   const zoom = clampZoom(Math.min(1, availableWidth / width, availableHeight / height));
-  board.view = { x: margin + (availableWidth - width * zoom) / 2 - left * zoom, y: margin + Math.max(0, (availableHeight - height * zoom) / 2) - top * zoom, zoom };
+  board.view = { x: FIT_MARGIN.side + (availableWidth - width * zoom) / 2 - left * zoom, y: FIT_MARGIN.top + Math.max(0, (availableHeight - height * zoom) / 2) - top * zoom, zoom };
   applyView();
 }
 
@@ -575,7 +586,10 @@ function focusNode(id) {
   card.classList.add("flash");
 }
 
+// Space held pans. Leaving the window drops it, since the key's release then goes to another app.
 function boardKeys(event) {
+  if (!$("canvas-viewport")) return;
+  if (event.type === "blur") { board.spaceHeld = false; $("canvas-viewport").classList.remove("panning"); return; }
   const typing = event.target.matches("input, textarea");
   if (event.code === "Space" && !typing) {
     board.spaceHeld = event.type === "keydown";
@@ -752,8 +766,10 @@ function syncComposer() {
     ...picked.map(path => ({ key: `pick|${path}`, node: thumb(inProject(project, path), { picked: true, badge: nodeOfPath(path), title: t("Builds on this image"), remove: () => { board.selected.delete(path); syncSelection(); } }) })),
     ...board.draft.attachments.map(item => ({ key: `attachment|${item.key}`, node: thumb(item.name, { src: item.url, title: item.name, remove: () => removeAttachment(item) }) }))
   ]);
+  // Without a style that can draw, the style slot already says why nothing can be sent.
+  board.noteSlot.hidden = !board.draft.style;
   board.noteSlot.textContent = !picked.length ? t("New image") : picked.length === 1 ? t("Refines {node}", { node: nodeOfPath(picked[0]) }) : tn("Builds on {count} image", "Builds on {count} images", picked.length);
-  board.composer.send.disabled = !board.draft.style || !board.draft.text.trim();
+  board.composer.send.disabled = board.sending || !board.draft.style || !board.draft.text.trim();
 }
 
 let attachmentCount = 0;
@@ -771,7 +787,8 @@ function removeAttachment(item) {
 
 async function sendRequest() {
   const draft = board.draft;
-  if (!draft.style || !draft.text.trim()) return;
+  if (board.sending || !draft.style || !draft.text.trim()) return;
+  board.sending = true;
   board.composer.send.disabled = true;
   try {
     const made = await api("/api/nodes", {
@@ -784,10 +801,12 @@ async function sendRequest() {
     board.composer.input.dispatchEvent(new Event("input"));
     board.selected.clear();
     board.focus = made.node;
+    board.sending = false;
     syncSelection();
     load();
   } catch (error) {
     toast(error.message, "error");
+    board.sending = false;
     syncComposer();
   }
 }
