@@ -236,14 +236,14 @@ function reviewLine(text) {
   return h("div", { class: "review", title: review.text }, [pill(label, { tone, small: true }), review.text ? h("span", { text: review.text }) : null]);
 }
 
-// Why a style cannot draw, in the viewer's language when the engine's reason is a known one.
-function blockedReason(reason) {
-  if (!reason) return "";
-  if (/ is a guide/.test(reason)) return t("A guide lends its sections and draws nothing.");
-  if (/has no model/.test(reason)) return t("No model yet.");
-  if (/has no prompting file/.test(reason)) return t("No prompt guide for its model yet.");
-  if (/has no style references/.test(reason)) return t("No style references yet.");
-  return reason;
+// Why a style cannot draw, from what the engine says it lacks.
+function blockedReason(style) {
+  return {
+    guide: t("A guide lends its sections and draws nothing."),
+    model: t("No model yet."),
+    prompting: t("No prompt guide for its model yet."),
+    references: t("No style references yet.")
+  }[style.missing] || "";
 }
 
 // Adding an image to a style's references is one action wherever the image is shown; references are managed on the style page.

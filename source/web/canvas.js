@@ -124,7 +124,7 @@ function renderPanel() {
     sectionTitle(t("Styles"), data.styles.length ? String(data.styles.length) : null),
     data.styles.length ? rowList(data.styles.map(style => listRow({
       title: style.name,
-      detail: style.blocked && !style.guide ? blockedReason(style.blocked) : style.purpose || null,
+      detail: style.blocked && !style.guide ? blockedReason(style) : style.purpose || null,
       onClick: () => { location.hash = hashes.style(project, style.name); },
       aside: h("div", { class: "row" }, [
         style.guide ? pill(t("Guide"), { small: true }) : style.blocked ? pill(t("Cannot draw yet"), { small: true }) : null,

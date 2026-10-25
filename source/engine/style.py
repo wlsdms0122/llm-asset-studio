@@ -254,18 +254,27 @@ class Style:
             target.write_bytes(read_object(name))
         return self.revision(f"restored revision {number}", "owner")
 
-    def blocked(self):
-        """Why the style cannot draw yet, or None when it can."""
+    def missing(self):
+        """What the style lacks to draw: guide (it never draws), model, prompting, or references; None when it can."""
         if self.guide():
-            return f"{self.name} is a guide; it lends its sections to the styles that extend it and draws nothing itself"
-        model = self.model()
-        if not model:
-            return f"{self.name} has no model yet"
-        if not self.prompting_file(model).exists():
-            return f"{self.name} has no prompting file for {model}"
+            return "guide"
+        if not self.model():
+            return "model"
+        if not self.prompting_file(self.model()).exists():
+            return "prompting"
         if not any(item["role"] == "style" for item in self.snapshot().references()):
-            return f"{self.name} has no style references yet; pick some from its probe images"
+            return "references"
         return None
+
+    def blocked(self):
+        """Why the style cannot draw yet, in words, or None when it can."""
+        return {
+            None: None,
+            "guide": f"{self.name} is a guide; it lends its sections to the styles that extend it and draws nothing itself",
+            "model": f"{self.name} has no model yet",
+            "prompting": f"{self.name} has no prompting file for {self.model()}",
+            "references": f"{self.name} has no style references yet; pick some from its probe images"
+        }[self.missing()]
 
     def recorded(self):
         """The last revision's number when the style and its bases are as it recorded them, else None."""

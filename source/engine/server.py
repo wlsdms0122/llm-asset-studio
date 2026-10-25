@@ -85,6 +85,7 @@ def style_summary(style):
         "extends": style.extends(),
         "model": style.model(),
         "blocked": style.blocked(),
+        "missing": style.missing(),
         "cover": next((item["path"] or f"objects/{item['object']}" for item in references if item["role"] == "style"), None),
         "revision": len(style.revisions()),
         "proposals": sum(1 for proposal in Proposal.all(style) if proposal.record["status"] == "open")
