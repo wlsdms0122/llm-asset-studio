@@ -173,11 +173,15 @@ def write_json(path, value):
 def write_once(path, value):
     """A record one side writes once and never rewrites: a node's input or result, a round, an answer."""
     path = Path(path)
+    # Written whole beside it and linked into place, so a reader never sees half a record and a second writer fails.
+    draft = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}")
+    draft.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
-        with open(path, "x", encoding="utf-8") as file:
-            file.write(json.dumps(value, ensure_ascii=False, indent=2))
+        os.link(draft, path)
     except FileExistsError:
         raise RecordError(f"{relative(path)} is already written")
+    finally:
+        draft.unlink()
 
 
 def claim_number(folder, prefix="", width=0):
