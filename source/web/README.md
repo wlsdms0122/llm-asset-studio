@@ -6,13 +6,15 @@ The web studio is built from one set of tokens and components so every screen be
 
 - Icons come from Lucide (lucide.dev, ISC license); copy a new one's paths into `ICONS` in `ui.js`, on its 24 by 24 grid.
 - The chrome is neutral (grays, one blue accent) so the images' own colors read true.
-- In a session, what the user writes is sent from the composer docked under the stage, as in a chat app; its send button is the one primary action. The panel's buttons move between stages (`success`) or are secondary. Outside a session, a panel has one primary action at its bottom right.
+- On the canvas and in a thread, what the user writes is sent from the composer docked under the stage, as in a chat app; its send button is the one primary action. A panel's buttons are secondary, except a step forward such as Draw it (`success`).
 - Actions on an image are icons over the image, shown on hover (`tool`). Actions on a page are labeled buttons.
 - Labels are short nouns or verbs. A title line says what to do; help text appears only where something can go wrong.
 - Motion says that something arrived or left: a new message, image, or attachment comes in with `.enter`, the composer grows and shrinks smoothly, dialogs and menus pop in. Nothing moves on a redraw that changed nothing, and reduced motion turns it all off.
 - The viewer picks the theme (system, light, dark) in the app bar; the choice stays in that browser.
 - Every text on screen is written in English through `t()` (or `tn()` when it counts something), and `i18n.js` gives its Korean. The shell's fixed words carry `data-t` or `data-t-title`. The viewer picks the language in the app bar and the choice stays in that browser. `verify` fails on a text without its Korean.
-- An image is shown either at its own ratio (`imageFrame` natural: boards, candidates, the lightbox) or cropped to a square cell (`imageFrame` fill: grids of many images, cards). Grids always use square cells so rows line up.
+- An image is shown either at its own ratio (`imageFrame` natural: candidates, the lightbox) or cropped to a square cell (`imageFrame` fill: grids, cards, canvas nodes). Grids and nodes use square cells so rows line up and a node's height does not wait for its images.
+- The agent's state is shown, never guessed: the app bar says whether an agent is attached (it looked for work in the last ten minutes), and anything waiting for it says plainly when no agent is there to pick it up.
+- A review stays hidden until the user has acted on the node, and shows its verdict in the viewer's language.
 - Adding an image to a style's references is a one-way action available wherever the image is shown; whether an image is a reference is not a property of the image. References are removed only from the reference list.
 
 ## Tokens (`ui.css` `:root`)
@@ -31,22 +33,51 @@ Each color token is `light-dark(light, dark)`, so one definition serves both the
 
 | component | use for |
 |---|---|
-| `button(label, { variant, small, grow, iconName })` | page and panel actions; variant `primary` (one per screen), `success` (moving a stage forward: 샘플, 확정, 추가), `danger` (deleting), `ghost`, or none |
-| `iconButton(icon, title, onClick)` | a panel action with a well-known icon (attach, new) |
-| `composer({ value, placeholder, sendTitle, onInput, onSend, attach })` | the message box docked under a conversation or a board, kept for as long as its round: images on top, the text, and a bar with attach on the left and send on the right; grows smoothly with the text, Cmd+Enter sends, `node.send` is the send button, `node.setImages([{ key, node }])` shows what goes with the message (picked images, then attachments) |
+| `button(label, { variant, small, grow, iconName })` | page and panel actions; variant `primary` (one per screen), `success` (a step forward: Draw it), `danger` (deleting), `ghost`, or none |
+| `iconButton(icon, title, onClick)` | a panel action with a well-known icon (attach, new, zoom) |
+| `linkButton(label, href, { variant, small, iconName })` | going to another page from inside content: a proposal on its style page, a node on the canvas |
+| `composer({ value, placeholder, sendTitle, onInput, onSend, attach, tools })` | the message box docked under a conversation or the canvas, kept for as long as what it answers: images on top, the text, and a bar with attach on the left, `tools` after it (a style `dropdown`, a `.composer-note` saying what send does), and send on the right; grows smoothly with the text, Cmd+Enter sends, `node.send` is the send button, `node.input` the text box, `node.setImages([{ key, node }])` shows what goes with the message (picked images, then attachments) |
 | `uploadButton(title, onFiles)` | picking image files |
 | `tool(icon, title, onClick, { href, download, on, quiet })` | actions over an image or a list row |
-| `pill(text, { tone, dot, small })` | status: `accent` for in progress or my turn, `success` for confirmed |
+| `pill(text, { tone, dot, small })` | status: `accent` for in progress or my turn, `success` for done or attached, `danger` for failed; a `live` dot while something runs |
 | `chip(text, { on })` | filters |
 | `dropdown({ value, options, onChange })` | choosing one of a few values in place, inside a line of other content |
-| `rowList(rows)`, `listRow({ title, detail, specs, aside, onClick, current })` | a list of things to open, choose, or delete (a style's models, its sessions); the action on a row is a quiet `tool` shown on hover |
+| `rowList(rows)`, `listRow({ title, detail, specs, aside, onClick, current })` | a list of things to open, choose, or delete (a project's styles and threads, a style's models); the action on a row is a quiet `tool` shown on hover |
 | `openMenu(at, items)` | a context menu or a dropdown's list |
 | `specList([[label, value]])` | a line of labeled values, such as a model's price, billing, and references; also `specs` on a list row or a choice |
-| `ask({ title, input, choices, danger, text })` | every dialog: a name, a note, a confirmation, picking one of a list, or reading a long text such as a prompt |
+| `ask({ title, input, choices, danger, text, wide })` | every dialog: a name, a note, a confirmation, picking one of a list, reading a long text such as a prompt, or editing one (`wide`, such as the brief) |
 | `toast(message, kind)` | the result of an action |
 | `field(label, value, { strong, mono, grows })` | a labeled piece of information (request, memo, prompt) |
 | `sectionTitle(title, aside)` | the heading of a block on the stage or in a panel |
 | `emptyState({ title, text, action })` | a list with nothing in it yet |
 | `workingNote(text)` | the agent is working |
 | `imageFrame(path, { fit, number, check, tools, onClick })` | every image larger than a thumbnail |
-| `thumb(path, { picked, small, remove, badge })` | small images in a row (attachments, references in a session, picks in a reply or in the composer, with their number as the badge) |
+| `thumb(path, { picked, small, remove, badge, src })` | small images in a row (attachments, subjects, picks in a reply or in the composer, with their number or node as the badge); `src` for a file not uploaded yet |
+
+## Screens
+
+| route | file | what it shows |
+|---|---|---|
+| `#/` | `app.js` | the projects as cards: cover, name, purpose, styles, how many items wait for the agent; right-click to rename or delete |
+| `#/p/<project>` | `canvas.js` | the project canvas (below), the panel (brief, styles with their guide badge, why one cannot draw, open proposals; New style and New guide; threads and New ideation; subjects), and the composer. `?node=<id>` brings a node into view |
+| `#/p/<project>/s/<style>` | `style.js` | the style page. `?proposal=<id>` names a proposal to show |
+| `#/p/<project>/t/<thread>` | `app.js` | a thread: rounds of the agent's note with its candidates, proposals and nodes it points to, and the user's replies; the composer answers the open round (picks, notes, reply, attachments). The panel shows style.md as the latest round showed it, or an ideation's brief with Draw it |
+| `#/archive` | `app.js` | every node image grouped by project; select several to download as a zip |
+
+The canvas pans by dragging the background, scrolling, or holding Space; Cmd or Ctrl with the wheel (or a pinch) zooms about the pointer. Each node is a card: kind, style, a status pill (queued, drawing, done, failed; queued says when no agent is attached), the request, its images, the agent's note, reviews once revealed, and model, revision, and cost. An edge runs from each parent image to the node built on it; frames from `canvas.json` are drawn around their nodes. Nodes nobody placed are laid out by lineage: frames one under another, in each the trees first (children to the right of their parent), then single nodes in rows. Dragging a card saves every card's place, so nothing moves under the user afterwards; later nodes go beside their parent or under everything. A click picks an image, Shift adds more, Escape or a click on the background clears; the picked images become the parents of what the composer sends (one picked image is a refine). Images dropped on the canvas become upload nodes; dropped on the composer, attachments. An image's menu removes its background (a tool node), adds it to a style's references, or downloads it; a double click opens it large with everything it was made from.
+
+## Page modules
+
+`app.js` owns the shell and routes by hash. A page registers itself with `page(name, module)`; `index.html` loads `app.js` first and the page files after it (`canvas.js`, `style.js`), and the router starts once all are loaded. A module is:
+
+```js
+page("style", {
+  enter(route) {},        // the route opened this page; #view is empty. Reset the page's own state here.
+  async load(route) {},   // right after enter, then every 3 s while no dialog or menu is open. Fetch, compare
+                          // with what is shown (signatureOf(value) leaves out the agent's age), and redraw only
+                          // what changed, so typing, scrolling, and images are never disturbed.
+  leave() {}              // optional: the route is leaving; save what is pending, remove window listeners.
+});
+```
+
+`route` is `{ name, project, style | thread, params }`, `params` the hash's query. A `load` that throws a 404 or 400 shows "Cannot open this page"; a lost server shows the reconnecting banner. Shared helpers in `app.js`: `api(path, body)` (JSON only; a response with `agent` updates the app bar), `hashes.*` for links, `inProject(project, path)` for a project path's file, `agentAttached()`, `panelHead`, `panelResizer`, `openLightbox`, `nodeImageItem`, `reviewLine`, `blockedReason`, `addToReferences`, `askName`, `confirmDelete`, `when`, `money`.

@@ -1,27 +1,22 @@
 "use strict";
 
-// The studio's pages, built from the components in ui.js.
-
-// ---------- vocabulary ----------
-
-const STAGES = [["discover", t("Style")], ["sample", t("Sample")], ["confirm", t("Confirm")]];
-const KIND_NAMES = { discover: t("Style"), sample: t("Sample"), confirm: t("Confirm"), generate: t("Generate"), model: t("Add model") };
-const SESSION_NAMES = { make: t("Making the style"), generate: t("Image"), ideation: t("Ideation"), model: t("Add model") };
-const sessionName = session => SESSION_NAMES[session.kind];
-// What the agent is doing after each answer, shown until the next round arrives.
-const WAITING = { sample: t("Preparing the sample"), discover: t("Preparing the conversation"), confirm: t("Preparing reference candidates"), generate: t("Drawing"), request: t("Drawing"), done: t("Wrapping up"), refine: t("Drawing"), new: t("Drawing") };
-const CONTINUING = { discover: t("Reading your answer"), confirm: t("Making more candidates") };
-const DRAWING = ["request", "refine", "new"];
+// The studio's shell and the pages it owns: the app bar, the router and polling, the lightbox, home, the thread page,
+// and the archive. The project canvas is in canvas.js and the style page in style.js; each registers itself with page().
+// Everything is built from the components in ui.js.
 
 // ---------- small helpers ----------
 
 const money = value => value == null ? "-" : `$${value < 0.01 && value > 0 ? value.toFixed(4) : value.toFixed(3)}`;
 const pad = (number, width = 2) => String(number).padStart(width, "0");
 const shortModel = model => (model || "").split("/").pop();
-const TOOL_NAMES = { cutout: t("Background removal") };
-// What made an image, for its details: a model and what one image cost, or a tool run on this computer.
-const madeWith = item => item.tool ? [t("Tool"), TOOL_NAMES[item.tool]] : [t("Model"), item.model && `${shortModel(item.model)}${item.cost != null ? ` · ${money(item.cost)}` : ""}`];
 const fileName = path => path.split("/").pop();
+const encode = encodeURIComponent;
+// Paths in a project's records are relative to the project; the server serves files by their workspace path.
+const inProject = (project, path) => `projects/${project}/${path}`;
+const objectUrl = name => `/object/${name}`;
+const TOOL_NAMES = { cutout: t("Background removal") };
+const KIND_NAMES = { generation: t("Generation"), tool: t("Tool"), upload: t("Upload") };
+const THREAD_NAMES = { style: t("Style thread"), ideation: t("Ideation") };
 
 function when(time) {
   if (!time) return "";
@@ -33,10 +28,19 @@ function when(time) {
   return date.toLocaleDateString(language, { month: "short", day: "numeric" });
 }
 
+const stamp = time => time ? time.replace("T", " ").slice(0, 16) : "";
+
+// Every call to the server. A response that says when the agent last looked updates the app bar.
 async function api(path, body) {
-  const response = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let response;
+  try {
+    response = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch {
+    throw Object.assign(new Error(t("Server unreachable. Reconnecting…")), { offline: true });
+  }
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(value.error || t("The request failed ({status})", { status: response.status })), { status: response.status });
+  if (value && value.agent) showAgent(value.agent);
   return value;
 }
 
@@ -44,119 +48,122 @@ function readFile(file) {
   return new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(",")[1]); reader.readAsDataURL(file); });
 }
 
-// ---------- state ----------
+// What a page compares between polls: its data without the agent's age, which changes on every call.
+const signatureOf = (value, ...more) => JSON.stringify([{ ...value, agent: undefined }, agentAttached(), ...more]);
 
-let route = { name: "home" };
-let data = null;
-let draft = freshDraft();
-let panelTab = "work";
-let rendered = null;
-// Whether the session view is pinned to its newest content; images that finish loading keep it there.
-let following = false;
-let archiveData = null;
-let selecting = null;
-// The model list with prices, read once per page load; the server keeps it for a day.
-let catalogModels = null;
-// The composer under the stage lives as long as the round it answers, so what is typed, its height, and its images
-// stay put while the page redraws around it.
-let dockComposer = null;
-// What the stage has shown in this session; anything new after the first drawing comes in with a motion.
-let appeared = { place: null, keys: new Set(), primed: false };
+// The rule of workspace.py stored_name, checked here first so a wrong name is answered in the viewer's language.
+const NAME = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{1,40}$/u;
 
-function freshDraft(key = null, picked = []) {
-  return { key, picked: new Set(picked), notes: {}, comment: "", request: "" };
-}
-
-// A draft belongs to one round of one session.
-const draftKey = current => `${data.style}|${current.session}|${current.round}|${current.opened}`;
-
-const view = () => data && data.view;
-const kind = () => view() && view().kind;
-const answering = () => Boolean(view() && !view().feedback);
-const selectable = () => answering() && ["discover", "confirm", "generate"].includes(kind());
-
-// ---------- routing ----------
-
-function readRoute() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/");
-  if (parts[0] === "s" && parts[1]) return { name: "style", style: decodeURIComponent(parts[1]), session: parts[2] ? decodeURIComponent(parts[2]) : null };
-  if (parts[0] === "archive") return { name: "archive", filter: parts[1] ? decodeURIComponent(parts[1]) : null };
-  return { name: "home" };
-}
-
-const styleHash = (style, session = null) => `#/s/${encodeURIComponent(style)}${session ? `/${encodeURIComponent(session)}` : ""}`;
-
-function go() {
-  route = readRoute();
-  data = null;
-  rendered = null;
-  following = false;
-  draft = freshDraft();
-  panelTab = "work";
-  selecting = null;
-  dockComposer = null;
-  closeMenu();
-  document.querySelectorAll("[data-nav]").forEach(link => link.classList.toggle("on", link.dataset.nav === route.name));
-  fill($("view"), );
-  load();
-}
-window.addEventListener("hashchange", go);
-
-async function load() {
-  try {
-    if (route.name === "home") await loadHome();
-    else if (route.name === "archive") await loadArchive();
-    else await loadStyle();
-    $("lost").hidden = true;
-  } catch (error) {
-    if (error instanceof TypeError) $("lost").hidden = false;
-    // A session that ended (a model added, a session deleted elsewhere) sends the page back to its style.
-    else if (route.name === "style" && error.status === 404 && route.session) location.hash = styleHash(route.style);
-    else if (route.name === "style" && (!data || error.status === 404)) renderMissing(error.message);
-  }
-}
-
-// A style page re-renders only when something the user can see has changed, so typing is never lost.
-async function loadStyle() {
-  const query = `style=${encodeURIComponent(route.style)}${route.session ? `&session=${encodeURIComponent(route.session)}` : ""}`;
-  const next = await api(`/api/state?${query}`);
-  // Inside a session only that session counts; the overview also follows the session list and the archive.
-  const signature = state => state && JSON.stringify(state.session
-    ? [state.session.id, state.view && [state.view.round, Boolean(state.view.feedback), state.view.attachments.length, state.view.candidates.length]]
-    : [state.sessions.map(session => [session.id, session.title, session.waiting]), state.archive.length, state.overview.references, state.overview.model, state.overview.models, state.overview.confirmed]);
-  const changed = signature(data) !== signature(next);
-  data = next;
-  if (changed) renderStyle();
-}
-
-// ---------- user actions on styles and references ----------
-
-// The rule of style.py style_name, checked here first so a wrong name is answered in the viewer's language.
-const STYLE_NAME = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{1,40}$/u;
-const NAME_RULE = t("Use two or more letters (lowercase for Latin), digits, and hyphens.");
-
-async function askName({ title, description = "", value = "", confirm, submit }) {
+async function askName({ title, description = "", value = "", confirm, taken, submit }) {
   let error = "";
   for (;;) {
     const name = await ask({ title, description, value, error, placeholder: t("Name, e.g. blog-cover"), confirm, input: "text" });
     if (name == null) return;
     value = name;
     const normalized = name.normalize("NFKC");
-    if (!STYLE_NAME.test(normalized) || normalized !== normalized.toLowerCase()) { error = NAME_RULE; continue; }
+    if (!NAME.test(normalized) || normalized !== normalized.toLowerCase()) { error = t("Use two or more letters (lowercase for Latin), digits, and hyphens."); continue; }
     try { return await submit(normalized); }
-    catch (failure) { error = failure.message.includes("already exists") ? t("A style with this name already exists.") : failure.message; }
+    catch (failure) { error = failure.message.includes("already exists") ? taken : failure.message; }
   }
 }
 
-function newStyle(base = null) {
-  return askName({
-    title: base ? t("New style based on {base}", { base }) : t("New style"),
-    description: base ? t("The conversation starts from the base style's words and references.") : t("Find the style you want together, in conversation."),
-    confirm: t("Create"),
-    submit: async name => { const result = await api("/api/styles", { name, base }); location.hash = styleHash(result.style); }
-  });
+async function confirmDelete(title, description) {
+  return ask({ title, description, confirm: t("Delete"), input: null, danger: true });
 }
-$("new-style").addEventListener("click", () => newStyle());
+
+// ---------- pages and routing ----------
+
+// A page module: { enter(route), load(route), leave() }. web/README.md has the contract.
+const pages = {};
+function page(name, module) { pages[name] = module; }
+
+const hashes = {
+  home: () => "#/",
+  archive: () => "#/archive",
+  project: (project, node = null) => `#/p/${encode(project)}${node ? `?node=${encode(node)}` : ""}`,
+  style: (project, style, proposal = null) => `#/p/${encode(project)}/s/${encode(style)}${proposal ? `?proposal=${encode(proposal)}` : ""}`,
+  thread: (project, thread) => `#/p/${encode(project)}/t/${encode(thread)}`
+};
+
+function readRoute() {
+  const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
+  let parts;
+  try { parts = path.split("/").map(decodeURIComponent); } catch { parts = []; }
+  const params = Object.fromEntries(new URLSearchParams(query));
+  if (parts[0] === "p" && parts[1]) {
+    if (parts[2] === "s" && parts[3]) return { name: "style", project: parts[1], style: parts[3], params };
+    if (parts[2] === "t" && parts[3]) return { name: "thread", project: parts[1], thread: parts[3], params };
+    return { name: "project", project: parts[1], params };
+  }
+  if (parts[0] === "archive") return { name: "archive", params };
+  return { name: "home", params };
+}
+
+let route = null;
+let shown = null;
+let loading = false;
+
+function go() {
+  if (shown && shown.leave) shown.leave();
+  route = readRoute();
+  shown = pages[route.name];
+  closeMenu();
+  $("lightbox").hidden = true;
+  document.querySelectorAll("[data-nav]").forEach(link => link.classList.toggle("on", link.dataset.nav === (route.name === "archive" ? "archive" : "home")));
+  fill($("view"));
+  document.title = "Asset Studio";
+  if (shown.enter) shown.enter(route);
+  load();
+}
+window.addEventListener("hashchange", go);
+
+async function load() {
+  const at = route;
+  loading = true;
+  try {
+    await shown.load(at);
+    $("lost").hidden = true;
+    // Pages that do not report the agent still keep the app bar current.
+    if (Date.now() - agent.checked > 10000) await api("/api/projects");
+  } catch (error) {
+    if (at !== route) return;
+    if (error.offline) $("lost").hidden = false;
+    else if (error.status === 404 || error.status === 400) renderMissing(error.message);
+    else console.error(error);
+  } finally {
+    loading = false;
+  }
+}
+
+function renderMissing(message) {
+  fill($("view"), h("div", { class: "page" }, [emptyState({ title: t("Cannot open this page"), text: message, action: linkButton(t("Back to projects"), hashes.home(), { small: false }) })]));
+}
+
+// ---------- app bar ----------
+
+// The agent is attached when it looked for work in the last ten minutes; watch looks every two seconds while idle.
+const AGENT_WINDOW = 600;
+const agent = { attached: null, checked: 0 };
+const agentAttached = () => agent.attached === true;
+
+function showAgent(state) {
+  agent.checked = Date.now();
+  const attached = state.seen != null && state.seen < AGENT_WINDOW;
+  if (attached === agent.attached) return;
+  agent.attached = attached;
+  fill($("presence"), attached
+    ? pill(t("Agent attached"), { tone: "success", dot: "static" })
+    : pill(t("No agent: run {command}", { command: "open-package watch" }), { dot: "static" }));
+  $("presence").title = attached ? t("The agent picks up requests and replies as they come.") : t("Requests and replies wait until an agent runs open-package watch.");
+}
+
+$("new-project").addEventListener("click", () => askName({
+  title: t("New project"),
+  description: t("A project is one purpose, such as an app or a blog, with its brief and styles."),
+  confirm: t("Create"),
+  taken: t("A project with this name already exists."),
+  submit: async name => { const made = await api("/api/projects", { name }); location.hash = hashes.project(made.project); }
+}));
 fill($("language"), menuButton("languages", t("Language"), { value: language, options: LANGUAGES.map(([value, label]) => ({ value, label })), onChange: setLanguage }));
 
 // The theme follows the system unless the viewer picks one; index.html applies a saved choice before the page draws.
@@ -164,8 +171,8 @@ const THEMES = [["system", t("System"), "monitor"], ["light", t("Light"), "sun"]
 
 function renderTheme() {
   const current = document.documentElement.dataset.theme || "system";
-  const shown = THEMES.find(([value]) => value === current);
-  fill($("theme"), menuButton(shown[2], t("Theme"), { value: current, options: THEMES.map(([value, label]) => ({ value, label })), onChange: setTheme }));
+  const chosen = THEMES.find(([value]) => value === current);
+  fill($("theme"), menuButton(chosen[2], t("Theme"), { value: current, options: THEMES.map(([value, label]) => ({ value, label })), onChange: setTheme }));
 }
 
 function setTheme(theme) {
@@ -176,46 +183,91 @@ function setTheme(theme) {
 }
 renderTheme();
 
-function renameStyle(style) {
-  return askName({
-    title: t("Rename"), value: style, confirm: t("Change"),
-    submit: async name => {
-      if (name === style) return;
-      await api("/api/styles/rename", { style, name });
-      if (route.name === "style") location.hash = styleHash(name);
-      else load();
+// ---------- shared pieces of project pages ----------
+
+// The head of a panel: the way back, the title with a menu of actions, and a line under it.
+function panelHead({ back, title, subtitle = null, menu = null, facts = [] }) {
+  return [
+    button(back[0], { small: true, iconName: "previous", title: t("Back"), class: "back", onClick: () => { location.hash = back[1]; } }),
+    h("div", { class: "title-row" }, [
+      h("h1", { text: title }),
+      menu ? tool("more", t("More"), event => { const box = event.currentTarget.getBoundingClientRect(); openMenu({ x: box.left, y: box.bottom + 4 }, menu); }, { quiet: true }) : null
+    ]),
+    subtitle ? h("p", { class: "subtitle" }, subtitle) : null,
+    facts.filter(Boolean).length ? h("div", { class: "facts" }, facts) : null
+  ];
+}
+
+// The handle on a panel's right edge; the width stays in this browser.
+function panelResizer() {
+  const range = [280, 560];
+  const set = width => document.documentElement.style.setProperty("--panel", `${Math.min(range[1], Math.max(range[0], width))}px`);
+  return h("div", {
+    class: "panel-resize", title: t("Drag to resize"),
+    onpointerdown: event => {
+      event.preventDefault();
+      document.body.classList.add("resizing");
+      const left = event.currentTarget.parentNode.getBoundingClientRect().left;
+      const move = moved => set(moved.clientX - left);
+      const up = () => {
+        document.body.classList.remove("resizing");
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        try { localStorage.setItem("panel-width", parseInt(getComputedStyle(document.documentElement).getPropertyValue("--panel"))); } catch {}
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
     }
   });
 }
+try { const saved = Number(localStorage.getItem("panel-width")); if (saved) document.documentElement.style.setProperty("--panel", `${saved}px`); } catch {}
 
-async function deleteStyle(style) {
-  const yes = await ask({ title: t("Delete {name}", { name: style }), description: t("The style, its references, archived images, and sessions are all deleted. This cannot be undone."), confirm: t("Delete"), input: null, danger: true });
-  if (!yes) return;
-  try { await api("/api/styles/delete", { style }); if (route.name === "style") location.hash = "#/"; else load(); }
-  catch (error) { toast(error.message, "error"); }
+// A review is "verdict: text" (document/review.md); the verdict is shown in the viewer's language.
+const VERDICTS = { pass: [t("Pass"), "success"], instance: [t("Flaw in this image"), ""], drift: [t("Style drift"), "danger"], leak: [t("Reference leak"), "danger"] };
+
+function readReview(text) {
+  const match = /^\s*(pass|instance|drift|leak)\b\s*[:：—-]?\s*([\s\S]*)$/i.exec(text || "");
+  return match ? { verdict: match[1].toLowerCase(), text: match[2].trim() } : { verdict: null, text: text || "" };
 }
 
-// Adding an image to a style's references is one action; the references themselves are managed where they are listed.
-async function addToReferences(style, path) {
+function reviewLine(text) {
+  const review = readReview(text);
+  const [label, tone] = VERDICTS[review.verdict] || [t("Review"), ""];
+  return h("div", { class: "review", title: review.text }, [pill(label, { tone, small: true }), review.text ? h("span", { text: review.text }) : null]);
+}
+
+// Why a style cannot draw, in the viewer's language when the engine's reason is a known one.
+function blockedReason(reason) {
+  if (!reason) return "";
+  if (/ is a guide/.test(reason)) return t("A guide lends its sections and draws nothing.");
+  if (/has no model/.test(reason)) return t("No model yet.");
+  if (/has no prompting file/.test(reason)) return t("No prompt guide for its model yet.");
+  if (/has no style references/.test(reason)) return t("No style references yet.");
+  return reason;
+}
+
+// Adding an image to a style's references is one action wherever the image is shown; references are managed on the style page.
+async function addToReferences(project, path, styles = null) {
   try {
-    const result = await api("/api/references/add", { style, path });
-    toast(result.added ? t("Added to references") : t("Already in references"));
-    load();
+    if (!styles) styles = (await api(`/api/project?project=${encode(project)}`)).styles;
+    if (!styles.length) return toast(t("This project has no styles yet."), "error");
+    const style = styles.length === 1 ? styles[0].name : await ask({
+      title: t("Add to references"), description: t("Choose the style that takes this image."), confirm: t("Add"), input: null,
+      choices: styles.map(each => ({ value: each.name, title: each.name, detail: each.guide ? t("Guide") : each.purpose }))
+    });
+    if (!style) return;
+    await api("/api/styles/references/add", { project, style, path });
+    toast(t("Added to the references of {style}", { style }));
   } catch (error) {
     toast(error.message, "error");
   }
-}
-
-async function removeReference(path) {
-  try { await api("/api/references/remove", { style: data.style, file: fileName(path) }); toast(t("Removed from references")); load(); }
-  catch (error) { toast(error.message, "error"); }
 }
 
 // ---------- lightbox ----------
 
 let gallery = { items: [], index: 0 };
 
-// items: [{ path, name, info: [[title, text, mono?]], add: { style, path } | null }]
+// items: [{ path (in the workspace), name, info: [[title, text or node, mono?]], add: () => void | null }]
 function openLightbox(items, index) {
   gallery = { items, index };
   showLightboxItem();
@@ -230,9 +282,12 @@ function showLightboxItem() {
   $("lightbox-count").textContent = gallery.items.length > 1 ? `${gallery.index + 1} / ${gallery.items.length}` : "";
   $("lightbox-previous").hidden = $("lightbox-next").hidden = gallery.items.length < 2;
   $("lightbox-add").hidden = !item.add;
-  const info = (item.info || []).filter(([, text]) => text);
+  const info = (item.info || []).filter(([, value]) => value);
   $("lightbox").classList.toggle("bare", !info.length);
-  fill($("lightbox-info"), ...info.flatMap(([title, text, mono]) => [h("h3", { text: title }), mono ? h("pre", { class: "document", text }) : h("p", { text })]));
+  fill($("lightbox-info"), ...info.flatMap(([title, value, mono]) => [
+    h("h3", { text: title }),
+    value instanceof Node ? h("div", { class: "lightbox-block" }, [value]) : mono ? h("pre", { class: "document", text: value }) : h("p", { text: value })
+  ]));
 }
 
 function stepLightbox(by) {
@@ -248,7 +303,7 @@ $("lightbox-next").innerHTML = icon("next");
 $("lightbox-previous").addEventListener("click", () => stepLightbox(-1));
 $("lightbox-next").addEventListener("click", () => stepLightbox(1));
 $("lightbox-close").addEventListener("click", () => { $("lightbox").hidden = true; });
-$("lightbox-add").addEventListener("click", () => { const { add } = gallery.items[gallery.index]; addToReferences(add.style, add.path); });
+$("lightbox-add").addEventListener("click", () => gallery.items[gallery.index].add());
 $("lightbox").addEventListener("click", event => { if (event.target.classList.contains("lightbox-stage")) $("lightbox").hidden = true; });
 
 document.addEventListener("keydown", event => {
@@ -262,142 +317,470 @@ document.addEventListener("keydown", event => {
   if (event.key === "Escape" && !$("modal").hidden) closeModal(null);
 });
 
+// Everything a node image was made from: the request, the agent's words, the style at its revision, the model, the
+// references attached and the ones left out with why, the prompt, and what the node cost.
+function nodeImageItem(project, node, image, styles = null) {
+  const used = node.references.length ? h("div", { class: "thumbs" }, node.references.map(item => thumb(item.path || item.object, {
+    small: true, src: objectUrl(item.object), badge: ROLE_NAMES[item.role] || item.role, title: item.path || ""
+  }))) : null;
+  const dropped = node.dropped.length ? node.dropped.map(item => `${item.reference}: ${item.reason}`).join("\n") : null;
+  const made = node.tool ? [t("Tool"), TOOL_NAMES[node.tool] || node.tool] : [t("Model"), shortModel(image.model || node.model)];
+  return {
+    path: inProject(project, image.path),
+    name: `${project}-${node.id}-${fileName(image.path)}`,
+    add: () => addToReferences(project, image.path, styles),
+    info: [
+      [t("Request"), node.request],
+      [t("Agent's note"), image.description || node.note],
+      [t("Review"), image.review ? reviewLine(image.review) : null],
+      [t("Style"), node.style && (node.revision ? t("{style} at revision {revision}", { style: node.style, revision: node.revision }) : node.style)],
+      made,
+      [t("References used"), used],
+      [t("References left out"), dropped],
+      [t("Cost"), node.cost ? tn("{cost} for {count} image", "{cost} for {count} images", node.images.length, { cost: money(node.cost) }) : null],
+      [t("Prompt"), image.prompt, true],
+      [t("Made at"), stamp(node.time)]
+    ]
+  };
+}
+const ROLE_NAMES = { style: t("Style"), subject: t("Subject"), composition: t("Composition"), guide: t("Guide"), attachment: t("Attachment") };
+
 // ---------- home ----------
 
-function statusPill(summary) {
-  if (summary.kind && summary.waiting) return pill(t("{kind} · your turn", { kind: KIND_NAMES[summary.kind] }), { tone: "accent", dot: "static" });
-  if (summary.working) return pill(summary.kind ? t("{kind} · working", { kind: KIND_NAMES[summary.kind] }) : t("Working"), { tone: "accent", dot: "live" });
-  if (summary.confirmed) return pill(t("Confirmed"), { tone: "success" });
-  return pill(t("Not started"));
+const home = { signature: null };
+
+page("home", {
+  enter() { home.signature = null; document.title = `${t("Projects")} · Asset Studio`; },
+  async load() {
+    const next = await api("/api/projects");
+    const signature = signatureOf(next);
+    if (signature === home.signature && $("home")) return;
+    home.signature = signature;
+    renderHome(next.projects);
+  }
+});
+
+function workingPill(count) {
+  if (!count) return null;
+  return agentAttached()
+    ? pill(tn("Working on {count}", "Working on {count}", count), { tone: "accent", dot: "live" })
+    : pill(tn("{count} waiting for the agent", "{count} waiting for the agent", count), { dot: "static" });
 }
 
-// Every page redraws only when what it shows has changed; a redraw on every poll makes the images flicker.
-let homeData = null;
-
-async function loadHome() {
-  const next = await api("/api/styles");
-  const changed = JSON.stringify(next) !== JSON.stringify(homeData);
-  homeData = next;
-  if (changed || !$("home")) renderHome(next);
-}
-
-function renderHome(home) {
-  document.title = `${t("Styles")} · Asset Studio`;
-  const cards = home.styles.map(summary => h("a", {
-    class: "card", href: styleHash(summary.name),
+function renderHome(projects) {
+  const cards = projects.map(project => h("a", {
+    class: "card", href: hashes.project(project.name),
     oncontextmenu: event => {
       event.preventDefault();
       openMenu({ x: event.clientX, y: event.clientY }, [
-        { label: t("Rename"), onClick: () => renameStyle(summary.name) },
-        summary.confirmed ? { label: t("New style from this one"), onClick: () => newStyle(summary.name) } : null,
-        { label: t("Delete"), onClick: () => deleteStyle(summary.name), danger: true }
+        { label: t("Rename"), onClick: () => renameProject(project.name) },
+        { label: t("Delete"), onClick: () => deleteProject(project.name), danger: true }
       ]);
     }
   }, [
-    summary.cover ? imageFrame(summary.cover, { fit: "fill" }) : h("div", { class: "placeholder", text: t("No images yet") }),
+    project.cover ? imageFrame(inProject(project.name, project.cover), { fit: "fill" }) : h("div", { class: "placeholder", text: t("No images yet") }),
     h("div", { class: "card-body" }, [
-      h("div", { class: "card-title" }, [h("strong", { text: summary.name }), statusPill(summary)]),
-      h("p", { class: "card-purpose", text: summary.purpose || t("Finding the style in conversation.") }),
+      h("div", { class: "card-title" }, [h("strong", { text: project.name }), workingPill(project.working)]),
+      h("p", { class: "card-purpose", text: project.purpose || t("Write what the project is for in its brief.") }),
       h("div", { class: "card-meta" }, [
-        summary.based_on ? h("span", { text: t("Based on {base}", { base: summary.based_on }) }) : null,
-        summary.archived ? h("span", { text: t("{count} archived", { count: summary.archived }) }) : null
+        h("span", { class: "card-styles", text: project.styles.length ? project.styles.join(" · ") : t("No styles yet") }),
+        h("span", { text: tn("{count} item", "{count} items", project.nodes) })
       ])
     ])
   ]));
-
   fill($("view"), h("div", { class: "page", id: "home" }, [
-    h("div", { class: "page-head" }, [h("div", {}, [h("h1", { text: t("Styles") }), h("p", { text: tn("{count} style", "{count} styles", home.styles.length) })])]),
-    cards.length ? h("div", { class: "cards" }, cards) : emptyState({ title: t("Make your first style"), text: t("Describe the pictures you want in conversation, and the style is written down together."), action: button(t("New style"), { variant: "primary", onClick: () => newStyle() }) })
+    h("div", { class: "page-head" }, [h("div", {}, [h("h1", { text: t("Projects") }), h("p", { text: tn("{count} project", "{count} projects", projects.length) })])]),
+    cards.length ? h("div", { class: "cards" }, cards) : emptyState({
+      title: t("Make your first project"),
+      text: t("A project holds one purpose, such as an app or a blog: its brief, its styles, and everything made for it."),
+      action: button(t("New project"), { variant: "primary", onClick: () => $("new-project").click() })
+    })
   ]));
+}
+
+function renameProject(project) {
+  return askName({
+    title: t("Rename"), value: project, confirm: t("Change"), taken: t("A project with this name already exists."),
+    submit: async name => {
+      if (name === project) return;
+      await api("/api/projects/rename", { project, name });
+      if (route.name === "home") load();
+      else location.hash = hashes.project(name);
+    }
+  });
+}
+
+async function deleteProject(project) {
+  if (!await confirmDelete(t("Delete {name}", { name: project }), t("Its brief, styles, images, and threads are all deleted. This cannot be undone."))) return;
+  try { await api("/api/projects/delete", { project }); if (route.name === "home") load(); else location.hash = hashes.home(); }
+  catch (error) { toast(error.message, "error"); }
+}
+
+// ---------- thread page ----------
+
+// The conversation lives as long as the page; the composer and its draft live as long as the round they answer.
+const conversation = { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false };
+
+page("thread", {
+  enter() { Object.assign(conversation, { signature: null, data: null, draft: null, composer: null, place: null, following: false, seen: new Set(), primed: false }); },
+  async load(at) {
+    const next = await api(`/api/thread?project=${encode(at.project)}&thread=${encode(at.thread)}`);
+    const signature = signatureOf(next);
+    if (signature === conversation.signature) return;
+    conversation.signature = signature;
+    conversation.data = next;
+    renderThread(at);
+  }
+});
+
+const latestRound = () => conversation.data.rounds[conversation.data.rounds.length - 1] || null;
+const openRound = () => { const latest = latestRound(); return latest && !latest.feedback ? latest : null; };
+const threadTitle = data => data.title || THREAD_NAMES[data.kind];
+
+function renderThread(at) {
+  const data = conversation.data;
+  const open = openRound();
+  const key = open ? `${at.project}|${at.thread}|${open.round}` : null;
+  if (!conversation.draft || conversation.draft.key !== key) conversation.draft = { key, picked: new Set(), notes: {}, comment: "" };
+  document.title = `${threadTitle(data)} · Asset Studio`;
+
+  if (!$("thread-page")) {
+    fill($("view"), h("div", { class: "workspace", id: "thread-page" }, [
+      h("aside", { class: "panel" }, [
+        h("div", { class: "panel-head", id: "thread-head" }),
+        h("div", { class: "panel-doc", id: "thread-doc" }),
+        h("div", { class: "panel-actions", id: "thread-actions" }),
+        panelResizer()
+      ]),
+      h("div", { class: "stage-column" }, [
+        h("section", { class: "stage", id: "thread-stage", onscroll: () => { conversation.following = nearBottom(); } }, [h("div", { class: "stage-inner", id: "thread-inner" })]),
+        h("div", { class: "dock", id: "thread-dock" })
+      ])
+    ]));
+    // Load events do not bubble, so the stage listens in the capture phase.
+    $("thread-stage").addEventListener("load", event => { if (conversation.following && event.target.tagName === "IMG") toBottom(); }, true);
+    new ResizeObserver(() => {
+      $("thread-stage").style.setProperty("--dock", `${$("thread-dock").offsetHeight}px`);
+      if (conversation.following) toBottom();
+    }).observe($("thread-dock"));
+  }
+
+  renderThreadPanel(at, data);
+  const wasAtBottom = nearBottom();
+  renderConversation(at, data);
+  renderThreadDock(at);
+  const place = `${at.project}|${at.thread}`;
+  if (conversation.place !== place || wasAtBottom) { conversation.following = true; toBottom(); }
+  conversation.place = place;
+}
+
+const nearBottom = () => { const stage = $("thread-stage"); return stage.scrollHeight - stage.scrollTop - stage.clientHeight < 80; };
+const toBottom = () => { const stage = $("thread-stage"); stage.scrollTop = stage.scrollHeight; };
+
+function renderThreadPanel(at, data) {
+  const latest = latestRound();
+  const ideation = data.kind === "ideation";
+  fill($("thread-head"), ...panelHead({
+    back: [at.project, hashes.project(at.project)],
+    title: threadTitle(data),
+    subtitle: [THREAD_NAMES[data.kind], " · ", h("a", { href: hashes.style(at.project, data.style), text: data.style }), ` · ${t("started {when}", { when: when(data.started) })}`],
+    menu: [
+      { label: t("Rename"), onClick: () => renameThread(at, data) },
+      { label: t("Delete"), danger: true, onClick: () => deleteThread(at) }
+    ]
+  }));
+  // A style thread shows style.md as the agent showed it in the latest round; an ideation shows the brief as it is now.
+  const text = ideation ? data.brief : latest && latest.spec;
+  fill($("thread-doc"),
+    sectionTitle(ideation ? t("Brief") : t("Style"), !ideation && latest ? t("As shown in round {round}", { round: latest.round }) : null),
+    text ? h("pre", { class: "document", text }) : h("p", { class: "muted", text: ideation ? t("The agent writes the brief here as the image takes shape.") : t("The agent writes the style here as you talk.") })
+  );
+  const open = openRound();
+  fill($("thread-actions"), ideation ? button(t("Draw it"), {
+    variant: "success", grow: true, iconName: "check", disabled: !data.brief || !open,
+    title: !data.brief ? t("Waits for the brief") : !open ? t("Waits for the agent's reply") : t("Turns the brief into a generation on the canvas"),
+    onClick: event => answer(at, "generate", event.currentTarget)
+  }) : null);
+}
+
+async function renameThread(at, data) {
+  let error = "";
+  for (;;) {
+    const name = await ask({ title: t("Rename"), value: data.title || "", error, placeholder: t("Name"), confirm: t("Change"), input: "text" });
+    if (name == null || name === (data.title || "")) return;
+    try { await api("/api/threads/rename", { project: at.project, thread: at.thread, name }); return load(); }
+    catch (failure) { error = failure.message; }
+  }
+}
+
+async function deleteThread(at) {
+  if (!await confirmDelete(t("Delete this thread"), t("The conversation and its images are deleted. Images it put on the canvas stay."))) return;
+  try { await api("/api/threads/delete", { project: at.project, thread: at.thread }); location.hash = hashes.project(at.project); }
+  catch (error) { toast(error.message, "error"); }
+}
+
+// " enter" for what the conversation shows for the first time since the page opened, so it comes in with a motion.
+function entering(key) {
+  const fresh = !conversation.seen.has(key);
+  conversation.seen.add(key);
+  return fresh && conversation.primed ? " enter" : "";
+}
+
+function messageNode(who, children, key) {
+  return h("div", { class: `message ${who}${entering(key)}` }, [h("div", { class: "avatar", text: who === "user" ? t("Me") : "AS" }), h("div", { class: "message-body" }, children)]);
+}
+
+function candidateItems(at, candidates) {
+  return candidates.map(candidate => ({
+    path: inProject(at.project, candidate.path),
+    name: `${at.project}-${fileName(candidate.path)}`,
+    add: () => addToReferences(at.project, candidate.path),
+    info: [[t("Agent's note"), candidate.description], [t("My note"), candidate.note], [t("Model"), shortModel(candidate.model)]]
+  }));
+}
+
+function renderConversation(at, data) {
+  const nodes = [];
+  const open = openRound();
+  for (const round of data.rounds) {
+    const items = candidateItems(at, round.candidates);
+    const links = [
+      ...round.proposals.map(id => linkButton(t("Proposal {id}", { id }), hashes.style(at.project, data.style, id), { iconName: "open" })),
+      ...round.nodes.map(id => linkButton(t("{node} on the canvas", { node: id }), hashes.project(at.project, id), { iconName: "open" }))
+    ];
+    const agentSays = [
+      round.note ? h("div", { class: "bubble", text: round.note }) : null,
+      round !== open && round.candidates.length ? h("div", { class: "thumbs" }, round.candidates.map((candidate, index) => thumb(inProject(at.project, candidate.path), { picked: candidate.picked, badge: pad(candidate.number), title: candidate.description || t("Enlarge"), onClick: () => openLightbox(items, index) }))) : null,
+      links.length ? h("div", { class: "message-links" }, links) : null
+    ];
+    if (agentSays.some(Boolean)) nodes.push(messageNode("agent", agentSays, `agent|${round.round}`));
+    if (round === open && round.candidates.length) nodes.push(candidateGrid(at, round, items));
+    if (round.feedback) nodes.push(userMessage(at, round, items));
+  }
+  const latest = latestRound();
+  if (!latest) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), t("Getting ready")])], "waiting|0"));
+  else if (latest.feedback) nodes.push(messageNode("agent", [agentAttached()
+    ? h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), latest.feedback.decision === "generate" ? t("Drawing it on the canvas") : t("Reading your answer")])
+    : h("div", { class: "bubble working" }, [t("No agent is attached, so this waits. Start one with open-package watch.")])], `waiting|${latest.round}`));
+  fill($("thread-inner"), h("div", { class: "thread" }, nodes));
+  conversation.primed = true;
+}
+
+// What the user answered: the reply, each picked or noted image with its number, the attachments, and a brief sent to the canvas.
+function userMessage(at, round, items) {
+  const feedback = round.feedback;
+  const marked = round.candidates.map((candidate, index) => ({ candidate, index })).filter(({ candidate }) => candidate.picked || candidate.note);
+  const attachments = feedback.attachments.map(path => ({ path: inProject(at.project, path), info: [] }));
+  return messageNode("user", [
+    feedback.decision === "generate" ? h("div", { class: "bubble" }, [t("Draw it")]) : null,
+    feedback.comment ? h("div", { class: "bubble", text: feedback.comment }) : null,
+    marked.length ? h("div", { class: "marks" }, marked.map(({ candidate, index }) => h("div", { class: "mark" }, [
+      thumb(inProject(at.project, candidate.path), { small: true, picked: candidate.picked, onClick: () => openLightbox(items, index) }),
+      h("div", {}, [
+        h("span", { class: "mark-head" }, [t("No. {number}", { number: pad(candidate.number) }), candidate.picked ? pill(t("Picked"), { tone: "accent", small: true }) : null]),
+        candidate.note ? h("span", { class: "mark-note", text: candidate.note }) : null
+      ])
+    ]))) : null,
+    attachments.length ? h("div", { class: "thumbs" }, attachments.map((item, index) => thumb(item.path, { onClick: () => openLightbox(attachments, index) }))) : null,
+    feedback.node ? linkButton(t("{node} on the canvas", { node: feedback.node }), hashes.project(at.project, feedback.node), { iconName: "open" }) : null
+  ], `user|${round.round}`);
+}
+
+// The open round's candidates: a click picks, the note tool writes a note that goes with the answer, picked or not.
+function candidateGrid(at, round, items) {
+  const draft = conversation.draft;
+  return h("div", { class: `candidates${entering(`grid|${round.round}`)}` }, round.candidates.map((candidate, index) => {
+    const note = draft.notes[candidate.number] || "";
+    return h("div", { class: `candidate selectable${draft.picked.has(candidate.number) ? " picked" : ""}`, "data-number": candidate.number }, [
+      imageFrame(inProject(at.project, candidate.path), {
+        number: candidate.number, check: true,
+        onClick: () => togglePick(at, candidate.number),
+        tools: [tool("memo", note || t("Note"), () => editNote(at, candidate), { on: Boolean(note) }), tool("zoom", t("Enlarge"), () => openLightbox(items, index))]
+      }),
+      candidate.description ? h("div", { class: "label", text: candidate.description }) : null,
+      note ? field(t("My note"), note) : null
+    ]);
+  }));
+}
+
+async function editNote(at, candidate) {
+  const draft = conversation.draft;
+  const text = await ask({ title: t("Note on No. {number}", { number: pad(candidate.number) }), description: t("Write what works or what falls short. Images you do not pick can have notes too."), value: draft.notes[candidate.number] || "", placeholder: t("e.g. I like the soft shadow"), confirm: t("Save") });
+  if (text == null) return;
+  if (text) draft.notes[candidate.number] = text;
+  else delete draft.notes[candidate.number];
+  renderConversation(at, conversation.data);
+  syncAnswer(at);
+}
+
+function togglePick(at, number) {
+  const picked = conversation.draft.picked;
+  if (picked.has(number)) picked.delete(number);
+  else picked.add(number);
+  document.querySelectorAll("#thread-inner [data-number]").forEach(node => node.classList.toggle("picked", picked.has(Number(node.dataset.number))));
+  syncAnswer(at);
+}
+
+// The composer for the open round: the reply, the picked candidates with their numbers, and the attachments.
+function renderThreadDock(at) {
+  const open = openRound();
+  if (!open) { conversation.composer = null; return fill($("thread-dock")); }
+  const draft = conversation.draft;
+  if (!conversation.composer || conversation.composer.key !== draft.key) {
+    conversation.composer = composer({
+      value: draft.comment,
+      placeholder: conversation.data.kind === "ideation" ? t("e.g. An app icon, but I don't know what to draw yet") : t("e.g. A little softer and simpler"),
+      sendTitle: `${t("Send")} (⌘↵)`,
+      onInput: value => { draft.comment = value; syncAnswer(at); },
+      onSend: event => answer(at, null, event.currentTarget),
+      attach: uploadButton(t("Attach images"), files => attach(at, files), { variant: "ghost" })
+    });
+    conversation.composer.key = draft.key;
+  }
+  if ($("thread-dock").firstElementChild !== conversation.composer) fill($("thread-dock"), conversation.composer);
+  syncAnswer(at);
+}
+
+function syncAnswer(at) {
+  const open = openRound();
+  const box = conversation.composer;
+  if (!open || !box) return;
+  const draft = conversation.draft;
+  const items = candidateItems(at, open.candidates);
+  box.setImages([
+    ...open.candidates.filter(candidate => draft.picked.has(candidate.number)).map(candidate => ({
+      key: `pick|${candidate.path}`,
+      node: thumb(inProject(at.project, candidate.path), { picked: true, badge: pad(candidate.number), title: t("No. {number}", { number: pad(candidate.number) }), remove: () => togglePick(at, candidate.number), onClick: () => openLightbox(items, candidate.number - 1) })
+    })),
+    ...open.attachments.map(path => ({ key: `attachment|${path}`, node: thumb(inProject(at.project, path), { remove: () => detach(at, path) }) }))
+  ]);
+  box.send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !open.attachments.length;
+}
+
+async function attach(at, files) {
+  for (const file of files) {
+    try { await api("/api/threads/attach", { project: at.project, thread: at.thread, name: file.name, data: await readFile(file) }); }
+    catch (error) { toast(error.message, "error"); }
+  }
+  await load();
+}
+
+async function detach(at, path) {
+  try { await api("/api/threads/detach", { project: at.project, thread: at.thread, path }); await load(); }
+  catch { toast(t("Could not remove the image. Reload and try again."), "error"); }
+}
+
+async function answer(at, decision, trigger) {
+  const open = openRound();
+  if (!open) return;
+  const draft = conversation.draft;
+  if (trigger) trigger.disabled = true;
+  try {
+    const feedback = await api("/api/threads/answer", {
+      project: at.project, thread: at.thread, round: open.round, decision,
+      picked: [...draft.picked], notes: draft.notes, comment: draft.comment
+    });
+    if (feedback.node) toast(t("Added {node} to the canvas", { node: feedback.node }));
+    await load();
+  } catch (error) {
+    toast(error.message, "error");
+    if (trigger) trigger.disabled = false;
+  }
 }
 
 // ---------- archive ----------
 
-async function loadArchive() {
-  const next = await api("/api/archive");
-  const changed = JSON.stringify(next) !== JSON.stringify(archiveData);
-  archiveData = next;
-  if (changed || !$("archive-grid")) renderArchive();
-}
+const archive = { signature: null, data: null, selecting: null };
 
-function archiveItems() {
-  const all = archiveData.styles.flatMap(shelf => [...shelf.items].reverse().map(item => ({ ...item, style: shelf.style })));
-  return { all, shown: route.filter ? all.filter(item => item.style === route.filter) : all };
-}
+page("archive", {
+  enter() { Object.assign(archive, { signature: null, data: null, selecting: null }); document.title = `${t("Archive")} · Asset Studio`; },
+  async load() {
+    const next = await api("/api/archive");
+    const signature = JSON.stringify(next);
+    if (signature === archive.signature && $("archive-page")) return;
+    archive.signature = signature;
+    archive.data = next;
+    renderArchive();
+  }
+});
 
-function lightboxFromArchive(item) {
-  return {
-    path: item.file,
-    name: `${item.style}-${fileName(item.file)}`,
-    add: { style: item.style, path: item.file },
-    info: [[t("Style"), item.style], [t("Request"), item.request], madeWith(item), [t("Prompt"), item.prompt, true], [t("Made at"), item.time && item.time.replace("T", " ").slice(0, 16)]]
-  };
+// Every image of every node, newest node first, grouped by project.
+function archiveShelves() {
+  return archive.data.projects.map(shelf => {
+    const nodes = [...shelf.nodes].reverse();
+    return {
+      project: shelf.project,
+      tiles: nodes.flatMap(node => node.images.map(image => ({
+        key: `${shelf.project}/${image.path}`, project: shelf.project, node, image,
+        item: nodeImageItem(shelf.project, node, image)
+      })))
+    };
+  }).filter(shelf => shelf.tiles.length);
 }
 
 // Choosing images only toggles classes and the bar, so the grid's images are never rebuilt (rebuilding them flickers).
 function renderArchive() {
-  document.title = `${t("Archive")} · Asset Studio`;
-  const { all, shown } = archiveItems();
-  const items = shown.map(lightboxFromArchive);
-  const chips = [chip(t("All {count}", { count: all.length }), { on: !route.filter, onClick: () => { location.hash = "#/archive"; } }),
-    ...archiveData.styles.map(shelf => chip(`${shelf.style} ${shelf.items.length}`, { on: route.filter === shelf.style, onClick: () => { location.hash = `#/archive/${encodeURIComponent(shelf.style)}`; } }))];
-
-  const tiles = shown.map((item, index) => {
-    const key = `${item.style}/${item.file}`;
-    return h("figure", { class: `tile${selecting && selecting.has(key) ? " picked" : ""}`, "data-key": key }, [
-      imageFrame(item.file, {
-        fit: "fill", check: true,
-        onClick: () => selecting ? toggleArchivePick(key) : openLightbox(items, index),
-        tools: [
-          tool("reference", t("Add to references"), () => addToReferences(item.style, item.file)),
-          tool("download", t("Download"), null, { href: fileUrl(item.file), download: `${item.style}-${fileName(item.file)}` })
-        ]
-      }),
-      h("figcaption", {}, [h("span", { text: item.request || "" }), h("span", { text: item.style })])
-    ]);
-  });
-
-  fill($("view"), h("div", { class: "page" }, [
+  const shelves = archiveShelves();
+  const all = shelves.flatMap(shelf => shelf.tiles);
+  const items = all.map(tile => tile.item);
+  let index = 0;
+  const sections = shelves.flatMap(shelf => [
+    sectionTitle(h("a", { href: hashes.project(shelf.project), text: shelf.project }), tn("{count} image", "{count} images", shelf.tiles.length)),
+    h("div", { class: "grid" }, shelf.tiles.map(tile => {
+      const at = index++;
+      return h("figure", { class: "tile", "data-key": tile.key }, [
+        imageFrame(tile.item.path, {
+          fit: "fill", check: true,
+          onClick: () => archive.selecting ? toggleArchivePick(tile.key) : openLightbox(items, at),
+          tools: [
+            tool("reference", t("Add to references"), tile.item.add),
+            tool("download", t("Download"), null, { href: fileUrl(tile.item.path), download: tile.item.name })
+          ]
+        }),
+        h("figcaption", {}, [h("span", { text: tile.node.request || TOOL_NAMES[tile.node.tool] || KIND_NAMES[tile.node.kind] }), h("span", { text: tile.node.id })])
+      ]);
+    }))
+  ]);
+  fill($("view"), h("div", { class: "page", id: "archive-page" }, [
     h("div", { class: "page-head" }, [
-      h("div", {}, [h("h1", { text: t("Archive") }), h("p", { text: t("Every image made with a style, and every reference, is kept here.") })]),
-      shown.length ? button(selecting ? t("Cancel selection") : t("Select"), { onClick: event => setSelecting(!selecting, event.currentTarget) }) : null
+      h("div", {}, [h("h1", { text: t("Archive") }), h("p", { text: t("Every image made in a project, kept with what it was made from.") })]),
+      all.length ? button(archive.selecting ? t("Cancel selection") : t("Select"), { onClick: event => setSelecting(!archive.selecting, event.currentTarget) }) : null
     ]),
-    all.length ? h("div", { class: "chips" }, chips) : null,
-    shown.length ? h("div", { class: `grid${selecting ? " selecting" : ""}`, id: "archive-grid" }, tiles) : h("div", { id: "archive-grid" }, [emptyState({ title: t("Nothing archived yet"), text: t("Images made with a confirmed style are kept here automatically.") })]),
+    all.length ? h("div", { id: "archive-grid", class: archive.selecting ? "selecting" : "" }, sections) : emptyState({ title: t("Nothing here yet"), text: t("Images made on a project's canvas show up here.") }),
     h("div", { id: "selection-bar" })
   ]));
   syncArchiveSelection();
 }
 
 function setSelecting(on, trigger) {
-  selecting = on ? new Set() : null;
+  archive.selecting = on ? new Set() : null;
   trigger.querySelector("span").textContent = on ? t("Cancel selection") : t("Select");
   $("archive-grid").classList.toggle("selecting", on);
   syncArchiveSelection();
 }
 
 function toggleArchivePick(key) {
-  if (selecting.has(key)) selecting.delete(key);
-  else selecting.add(key);
+  if (archive.selecting.has(key)) archive.selecting.delete(key);
+  else archive.selecting.add(key);
   syncArchiveSelection();
 }
 
 function syncArchiveSelection() {
+  const selecting = archive.selecting;
   document.querySelectorAll("#archive-grid .tile").forEach(tile => tile.classList.toggle("picked", Boolean(selecting && selecting.has(tile.dataset.key))));
   const bar = $("selection-bar");
-  if (!selecting) return fill(bar, );
+  if (!selecting) return fill(bar);
   fill(bar, h("div", { class: "selection-bar" }, [
     h("span", { text: tn("{count} selected", "{count} selected", selecting.size) }),
     h("div", { class: "row" }, [
-      button(t("Select all"), { onClick: () => { archiveItems().shown.forEach(item => selecting.add(`${item.style}/${item.file}`)); syncArchiveSelection(); } }),
+      button(t("Select all"), { onClick: () => { archiveShelves().forEach(shelf => shelf.tiles.forEach(tile => selecting.add(tile.key))); syncArchiveSelection(); } }),
       button(t("Download"), { variant: "primary", iconName: "download", disabled: !selecting.size, onClick: downloadSelected })
     ])
   ]));
 }
 
 async function downloadSelected() {
-  const { all } = archiveItems();
-  const files = all.filter(item => selecting.has(`${item.style}/${item.file}`)).map(item => ({ path: item.file, name: `${item.style}-${fileName(item.file)}` }));
+  const files = archiveShelves().flatMap(shelf => shelf.tiles).filter(tile => archive.selecting.has(tile.key)).map(tile => ({ path: tile.item.path, name: tile.item.name }));
   try {
     const response = await fetch("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files }) });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || t("Could not download"));
@@ -409,711 +792,10 @@ async function downloadSelected() {
   }
 }
 
-// ---------- style page ----------
+// ---------- start ----------
 
-function renderMissing(message) {
-  fill($("view"), h("div", { class: "page" }, [emptyState({ title: t("Cannot open the style"), text: message, action: h("a", { class: "button", href: "#/", text: t("Back to styles") }) })]));
-}
-
-function renderStyle() {
-  const current = view();
-  if (current && draft.key !== draftKey(current)) {
-    // A confirm round may open with the user's earlier picks already picked.
-    draft = freshDraft(draftKey(current), current.candidates.filter(candidate => candidate.picked).map(candidate => candidate.number));
-  }
-  // A re-render rebuilds the text box; whoever was typing keeps the caret.
-  const typing = document.activeElement && document.activeElement.matches(".composer textarea") ? document.activeElement.selectionStart : null;
-  document.title = `${data.style} · Asset Studio`;
-
-  if (!$("workspace")) {
-    fill($("view"), h("div", { class: "workspace", id: "workspace" }, [
-      h("aside", { class: "panel" }, [
-        h("div", { class: "panel-head", id: "panel-head" }),
-        h("div", { class: "tabs", id: "tabs" }),
-        h("div", { class: "panel-body", id: "panel-body" }),
-        h("div", { class: "panel-doc", id: "panel-doc", hidden: true }, [h("pre", { class: "document" })]),
-        h("div", { class: "panel-actions", id: "panel-actions" }),
-        h("div", { class: "panel-resize", id: "panel-resize", title: t("Drag to resize") })
-      ]),
-      h("div", { class: "stage-column" }, [
-        h("section", { class: "stage", id: "stage", onscroll: syncLatestButton }, [
-          h("div", { class: "stage-inner", id: "stage-inner" }),
-          h("button", { class: "latest", id: "latest", type: "button", hidden: true, html: `${icon("down")}<span>${t("New messages")}</span>`, onclick: () => scrollToLatest(true) })
-        ]),
-        h("div", { class: "dock", id: "dock" })
-      ])
-    ]));
-    bindResize();
-    // Load events do not bubble, so the stage listens in the capture phase.
-    $("stage").addEventListener("load", event => { if (following && event.target.tagName === "IMG") $("stage").scrollTop = $("stage").scrollHeight; }, true);
-    // The stage keeps room for the composer floating over it; while the composer grows or shrinks, a stage following
-    // the newest content stays on it.
-    new ResizeObserver(() => {
-      $("stage").style.setProperty("--dock", `${$("dock").offsetHeight}px`);
-      if (following) $("stage").scrollTop = $("stage").scrollHeight;
-    }).observe($("dock"));
-  }
-
-  renderPanelHead();
-  renderPanelBody();
-  renderTabs();
-  const stage = $("stage");
-  const atBottom = stage.scrollHeight - stage.scrollTop - stage.clientHeight < 80;
-  renderStage();
-  followLatest(atBottom);
-  const input = document.querySelector(".composer textarea");
-  if (typing != null && input) { input.focus(); input.setSelectionRange(typing, typing); }
-}
-
-// A session reads top to bottom, the newest at the end: the page follows new content unless the user has scrolled up to read.
-function followLatest(wasAtBottom) {
-  const place = data.session ? `${data.style}|${data.session.id}` : null;
-  if (!place) { $("latest").hidden = true; rendered = null; following = false; return; }
-  if (rendered !== place || wasAtBottom) scrollToLatest(rendered === place);
-  else $("latest").hidden = false;
-  rendered = place;
-}
-
-function scrollToLatest(smooth) {
-  const stage = $("stage");
-  following = true;
-  stage.scrollTo({ top: stage.scrollHeight, behavior: smooth ? "smooth" : "auto" });
-  $("latest").hidden = true;
-}
-
-function syncLatestButton() {
-  const stage = $("stage");
-  following = Boolean(data && data.session) && stage.scrollHeight - stage.scrollTop - stage.clientHeight < 80;
-  if (following) $("latest").hidden = true;
-}
-
-function renderPanelHead() {
-  const current = view();
-  const overview = data.overview;
-  const session = data.session;
-  const stage = current && session.kind === "make" ? STAGES.findIndex(([name]) => name === current.kind) : -1;
-  const pills = [];
-  if (overview.confirmed && !session) pills.push(pill(t("Confirmed"), { tone: "success" }));
-  const model = session ? (current ? (current.blind ? "" : current.model) : session.model) : overview.model;
-  if (model) pills.push(pill(shortModel(model)));
-  if (overview.based_on && !session) pills.push(pill(t("Based on {base}", { base: overview.based_on })));
-  if (current && current.session_cost > 0) pills.push(pill(t("Cost {cost}", { cost: money(current.session_cost) })));
-  const inSession = session && session.kind !== "make";
-
-  fill($("panel-head"),
-    button(inSession ? data.style : t("Styles"), { small: true, iconName: "previous", title: t("Back"), class: "back", onClick: () => { location.hash = inSession ? styleHash(data.style) : "#/"; } }),
-    inSession
-      ? h("div", { class: "title-row" }, [h("h1", { text: session.title || sessionName(session) }), tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true })])
-      : h("h1", { text: data.style }),
-    inSession ? h("p", { class: "subtitle", text: t("{kind} session · started {when}", { kind: sessionName(session), when: when(session.started) }) }) : null,
-    session && session.kind === "make" ? h("div", { class: "stepper" }, STAGES.map(([, name], index) => h("div", { class: `step${index < stage ? " done" : index === stage ? " now" : ""}`, text: name }))) : null,
-    pills.length ? h("div", { class: "facts" }, pills) : null
-  );
-}
-
-// The documents shown with this view: the round's copies while it is open, the style's own otherwise.
-function documents() {
-  const source = view() || data.overview;
-  return [["brief", t("Brief"), source.brief], ["spec", t("Style"), source.spec], ["prompting", t("Prompt"), source.prompting]].filter(([, , text]) => text);
-}
-
-function renderTabs() {
-  const docs = documents();
-  if (!docs.some(([key]) => key === panelTab)) panelTab = "work";
-  $("tabs").hidden = !docs.length;
-  fill($("tabs"), ...[["work", data.session ? t("Work") : t("Overview")], ...docs].map(([key, label]) => h("button", {
-    class: `tab${key === panelTab ? " on" : ""}`, type: "button", text: label,
-    onclick: () => { panelTab = key; renderTabs(); }
-  })));
-  const doc = docs.find(([key]) => key === panelTab);
-  $("panel-doc").hidden = !doc;
-  $("panel-doc").firstElementChild.textContent = doc ? doc[2] : "";
-  $("panel-body").hidden = Boolean(doc);
-  $("panel-actions").hidden = Boolean(doc);
-}
-
-// ---------- panel: what to do now ----------
-
-function renderPanelBody() {
-  const current = view();
-  const body = $("panel-body");
-  const actions = $("panel-actions");
-  if (!answering()) { dockComposer = null; fill($("dock"), ); }
-  if (!data.session) return renderIdlePanel(body, actions);
-  if (!current) {
-    fill(body, workingNote(data.session.kind === "model" ? t("Writing the prompt guide for this model") : t("Getting ready")));
-    fill(actions, );
-    return;
-  }
-  if (!answering()) {
-    const decision = current.feedback.decision;
-    fill(body, workingNote(WAITING[decision] || CONTINUING[current.kind] || t("Preparing the next step")));
-    fill(actions, );
-    return;
-  }
-  const panels = { discover: discoverPanel, sample: samplePanel, confirm: confirmPanel, generate: generatePanel, model: modelPanel };
-  panels[current.kind](current, body, actions);
-}
-
-function renderIdlePanel(body, actions) {
-  const overview = data.overview;
-  if (!overview.confirmed) {
-    fill(body, h("h2", { text: t("No open session") }));
-    fill(actions, );
-    return;
-  }
-  const sessions = data.sessions.filter(session => session.kind !== "make").sort((a, b) => b.updated.localeCompare(a.updated));
-  fill(body,
-    h("h2", { text: t("Make images in this style") }),
-    h("p", { class: "lead", text: t("A new image is drawn straight from what you write; a new ideation works out what to draw in conversation. Images you make are kept in the archive.") }),
-    h("dl", { class: "facts-list" }, [
-      h("div", {}, [h("dt", { text: t("References") }), h("dd", { text: tn("{count} image", "{count} images", overview.references.length) })]),
-      h("div", {}, [h("dt", { text: t("Archived images") }), h("dd", { text: tn("{count} image", "{count} images", data.archive.length) })]),
-      overview.based_on ? h("div", {}, [h("dt", { text: t("Base style") }), h("dd", { text: overview.based_on })]) : null
-    ]),
-    sectionTitle(t("Models"), button(t("Add model"), { small: true, onClick: addModel })),
-    h("div", { id: "model-rows" }, [rowList(overview.models.map(modelRow))]),
-    sectionTitle(t("Sessions"), sessions.length ? String(sessions.length) : ""),
-    sessions.length ? rowList(sessions.map(sessionRow)) : h("p", { class: "muted", text: t("No sessions yet.") })
-  );
-  const image = button(t("New image"), { variant: "primary", grow: true });
-  image.addEventListener("click", () => openSession("generate", null, image));
-  const ideation = button(t("New ideation"), { grow: true });
-  ideation.addEventListener("click", () => openSession("ideation", null, ideation));
-  fill(actions, ideation, image);
-  if (!catalogModels) loadCatalog().then(() => { if ($("model-rows")) fill($("model-rows"), rowList(data.overview.models.map(modelRow))); }).catch(() => {});
-}
-
-// A row per model: choosing one makes it the model in use; any other can be removed.
-function modelRow(model) {
-  const inUse = model === data.overview.model;
-  const listed = catalogModels && catalogModels.find(each => each.id === model);
-  return listRow({
-    title: shortModel(model), detail: model, specs: listed ? modelSpecs(listed) : null, current: inUse, hint: inUse ? null : t("Draw with this model"), onClick: () => useModel(model),
-    aside: inUse ? pill(t("In use"), { tone: "success" }) : tool("trash", t("Delete model"), () => removeModel(model), { quiet: true, danger: true })
-  });
-}
-
-async function removeModel(model) {
-  const yes = await ask({ title: t("Delete model"), description: t("Deletes {model} and its prompt guide for this style. Images made with it stay in the archive.", { model: shortModel(model) }), confirm: t("Delete"), input: null, danger: true });
-  if (!yes) return;
-  try { await api("/api/models/delete", { style: data.style, model }); toast(t("Model deleted")); load(); }
-  catch (error) { toast(error.message, "error"); }
-}
-
-function sessionRow(session) {
-  return listRow({
-    title: session.title || (session.kind === "model" ? SESSION_NAMES.model : t("New {kind}", { kind: sessionName(session) })),
-    detail: `${sessionName(session)} · ${when(session.updated)}`,
-    onClick: () => { location.hash = styleHash(data.style, session.id); },
-    aside: h("div", { class: "row" }, [
-      session.waiting ? null : pill(t("Working"), { tone: "accent", dot: "live" }),
-      tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true }),
-      tool("trash", t("Delete session"), () => deleteSession(session), { quiet: true, danger: true })
-    ])
-  });
-}
-
-async function renameSession(session) {
-  let error = "";
-  for (;;) {
-    const name = await ask({ title: t("Rename session"), value: session.title || "", error, placeholder: t("Name"), confirm: t("Change"), input: "text" });
-    if (name == null || name === (session.title || "")) return;
-    try { await api("/api/sessions/rename", { style: data.style, session: session.id, name }); data = null; return load(); }
-    catch (failure) { error = failure.message; }
-  }
-}
-
-async function openSession(sessionKind, model, trigger) {
-  if (trigger) trigger.disabled = true;
-  try {
-    const opened = await api("/api/sessions", { style: data.style, kind: sessionKind, model });
-    location.hash = styleHash(data.style, opened.session);
-  } catch (error) {
-    toast(error.message, "error");
-    if (trigger) trigger.disabled = false;
-  }
-}
-
-async function deleteSession(session) {
-  const yes = await ask({ title: t("Delete session"), description: session.kind === "model" ? t("Stops adding this model and deletes its records.") : t("Deletes the session's records. Images made in it stay in the archive."), confirm: t("Delete"), input: null, danger: true });
-  if (!yes) return;
-  try {
-    await api("/api/sessions/delete", { style: data.style, session: session.id });
-    if (route.session === session.id) location.hash = styleHash(data.style);
-    else load();
-  } catch (error) { toast(error.message, "error"); }
-}
-
-async function useModel(model) {
-  try { await api("/api/model", { style: data.style, model }); toast(t("Drawing with {model}", { model: shortModel(model) })); load(); }
-  catch (error) { toast(error.message, "error"); }
-}
-
-// What one output image is listed at on OpenRouter, by its billing unit.
-function priceLabel(model) {
-  const price = model.price;
-  if (!price || price.cost == null) return t("No price listed");
-  if (price.cost === 0) return t("Free");
-  const from = price.varies ? t(" and up") : "";
-  if (price.unit === "image") return t("{cost} / image", { cost: money(price.cost) }) + from;
-  if (price.unit === "megapixel") return t("About {cost} / 1K image", { cost: money(price.cost * 1.05) }) + from;
-  return t("{cost} / 1M tokens", { cost: `$${+(price.cost * 1e6).toFixed(2)}` }) + from;
-}
-
-// What a model is, as OpenRouter lists it: the price of one image, how it is billed, and the references it takes.
-function modelSpecs(model) {
-  return [
-    [t("Price"), priceLabel(model)],
-    billingLabel(model) ? [t("Billing"), billingLabel(model)] : null,
-    [t("References"), t("Up to {count}", { count: model.references })],
-    model.price && model.price.reference ? [t("Per reference"), money(model.price.reference)] : null
-  ];
-}
-
-// Whether one image always costs the same: a flat price per image, or one that changes with the options, the size, or the tokens.
-function billingLabel(model) {
-  const price = model.price;
-  if (!price || !price.cost) return null;
-  if (price.unit === "image") return price.varies ? t("Changes with options") : t("Fixed per image");
-  if (price.unit === "megapixel") return t("Changes with size");
-  return t("Changes with tokens");
-}
-
-async function loadCatalog() {
-  if (!catalogModels) catalogModels = (await api("/api/catalog")).models;
-  return catalogModels;
-}
-
-async function addModel() {
-  let catalog;
-  try { catalog = await loadCatalog(); }
-  catch (error) { return toast(error.message, "error"); }
-  // A style draws with all its references attached, so only models that take that many are offered; one already being added is not offered twice.
-  const adding = data.sessions.filter(session => session.kind === "model").map(session => session.model);
-  const needed = Math.max(1, data.overview.references.length);
-  const choices = catalog.filter(model => model.references >= needed && !data.overview.models.includes(model.id) && !adding.includes(model.id))
-    .sort((a, b) => (b.created || 0) - (a.created || 0))
-    .map(model => ({
-      value: model.id, title: model.name, detail: model.id, specs: modelSpecs(model)
-    }));
-  const model = await ask({ title: t("Add model"), description: t("Choosing one writes a prompt guide for it, refined over a few drawings."), confirm: t("Start adding"), input: null, choices });
-  if (model) openSession("model", model);
-}
-
-// The message box under the stage, docked once per round: the text, the images that go with the answer, and send.
-// The draft field it writes is the request on boards and the reply in conversations.
-function answerBox(placeholder, { attaching = true, sendTitle, onSend }) {
-  const current = view();
-  const field = draftField();
-  const key = `${draftKey(current)}|${field}`;
-  if (!dockComposer || dockComposer.key !== key) {
-    dockComposer = composer({
-      value: draft[field], placeholder, sendTitle: `${sendTitle} (⌘↵)`, onSend,
-      onInput: value => { draft[field] = value; syncSend(); },
-      attach: attaching ? attachButton() : null
-    });
-    dockComposer.key = key;
-  }
-  if ($("dock").firstElementChild !== dockComposer) fill($("dock"), dockComposer);
-  syncComposerImages();
-  syncSend();
-  return dockComposer;
-}
-
-const draftField = () => ["discover", "confirm"].includes(kind()) ? "comment" : "request";
-
-// The images that go with the answer: the attempt or candidates picked, each with its number, then the attachments.
-function syncComposerImages() {
-  if (!dockComposer) return;
-  const current = view();
-  const picks = ["discover", "generate"].includes(kind()) ? current.candidates.filter(candidate => draft.picked.has(candidate.number)) : [];
-  dockComposer.setImages([
-    ...picks.map(candidate => ({ key: `pick|${candidate.path}`, node: thumb(candidate.path, { picked: true, badge: pad(candidate.number), title: t("No. {number}", { number: pad(candidate.number) }), remove: () => togglePick(candidate.number) }) })),
-    ...current.attachments.map(path => ({ key: `attachment|${path}`, node: thumb(path, { remove: () => detach(path) }) }))
-  ]);
-}
-
-// Whether the answer can be sent follows what is written and picked.
-function syncSend() {
-  if (!dockComposer || !view()) return;
-  const current = view();
-  if (kind() === "discover") dockComposer.send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !current.attachments.length;
-  else dockComposer.send.disabled = !draft[draftField()].trim();
-}
-
-function attachButton() {
-  return uploadButton(t("Attach images"), async files => {
-    for (const file of files) {
-      try { await api("/api/attach", { style: data.style, session: data.session.id, name: file.name, data: await readFile(file) }); }
-      catch (error) { toast(error.message, "error"); }
-    }
-    await load();
-  }, { variant: "ghost" });
-}
-
-async function detach(path) {
-  try { await api("/api/detach", { style: data.style, session: data.session.id, path }); await load(); }
-  catch { toast(t("Could not remove the image. Reload and try again."), "error"); }
-}
-
-// The talk of a make session writes the style; an ideation session writes the image's brief.
-function discoverPanel(current, body, actions) {
-  const imageTalk = data.session.kind === "ideation";
-  const written = imageTalk ? current.brief : current.spec;
-  const lead = current.candidates.length ? t("Pick the images you like; each can carry a note.") : written ? (imageTalk ? t("If the brief I wrote is off, just correct it.") : t("If the description I wrote is off, just correct it.")) : null;
-  const next = imageTalk ? [t("Generate"), "generate"] : [t("Sample"), "sample"];
-  fill(body,
-    h("h2", { text: imageTalk ? (written ? t("Check the brief") : t("Tell me what image you need")) : written ? t("Check the description") : t("Tell me the style you want") }),
-    lead ? h("p", { class: "lead", text: lead }) : null
-  );
-  fill(actions, written ? button(next[0], { variant: "success", grow: true, onClick: () => submit(next[1]) }) : null);
-  answerBox(imageTalk ? t("e.g. An app icon, but I don't know what to draw yet") : t("e.g. A little softer and simpler"), { sendTitle: t("Send"), onSend: () => submit(null) });
-}
-
-function samplePanel(current, body, actions) {
-  answerBox(t("e.g. A mug by the window on a rainy day"), { sendTitle: t("Draw"), onSend: () => submit("request") });
-  fill(body,
-    h("h2", { text: t("Try drawing in this style") }),
-    h("p", { class: "lead", text: current.unit_cost != null ? t("{cost} an image", { cost: money(current.unit_cost) }) : t("What you write is drawn one image at a time.") })
-  );
-  fill(actions, button(t("Style"), { grow: true, onClick: () => submit("discover", draft.request) }), button(t("Confirm"), { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("confirm") }));
-}
-
-function confirmPanel(current, body, actions) {
-  answerBox(t("Anything more you want to see? e.g. One or two more subjects"), { attaching: false, sendTitle: t("Send"), onSend: () => submit(null) });
-  fill(body,
-    h("h2", { text: t("Pick the images to use as references") }),
-    h("p", { class: "lead", id: "selection-count" })
-  );
-  fill(actions, button(t("Sample"), { onClick: () => submit("sample", draft.comment) }), button(t("Confirm"), { variant: "success", grow: true, onClick: () => submit("done") }));
-  syncSelection();
-}
-
-function generatePanel(current, body, actions) {
-  const started = current.candidates.length > 0;
-  fill(body,
-    h("h2", { text: started ? t("Pick one and write what to change") : t("What shall we make?") }),
-    h("p", { class: "lead", id: "selection-count", text: started ? "" : t("Images you make are kept in the archive automatically.") })
-  );
-  fill(actions, );
-  answerBox(started ? t("e.g. A bigger handle") : t("e.g. A coffee cup in front of a laptop"), { sendTitle: t("Generate"), onSend: () => submit(draft.picked.size ? "refine" : "new") });
-  syncSelection();
-}
-
-function modelPanel(current, body, actions) {
-  answerBox(t("e.g. A monstera by the window"), { sendTitle: t("Draw"), onSend: () => submit("request") });
-  fill(body,
-    h("h2", { text: t("Try drawing with {model}", { model: shortModel(current.model) }) }),
-    h("p", { class: "lead", text: t("Each image is drawn with the references attached. When it looks like this style, press Add.") })
-  );
-  fill(actions, button(t("Add"), { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("done") }));
-}
-
-// What the picks mean for the next step, kept in step with the cards.
-function syncSelection() {
-  const count = $("selection-count");
-  if (kind() === "confirm") {
-    if (count) count.textContent = draft.picked.size ? tn("{count} picked. The more varied the subjects and colors, the better.", "{count} picked. The more varied the subjects and colors, the better.", draft.picked.size) : "";
-    const done = [...$("panel-actions").querySelectorAll(".button.success")].pop();
-    if (done) done.disabled = !draft.picked.size;
-  }
-  if (kind() === "generate" && view().candidates.length && count) {
-    const [picked] = [...draft.picked];
-    count.textContent = picked ? t("Changing number {number}", { number: pad(picked) }) : t("Nothing picked draws a new one");
-  }
-}
-
-async function submit(decision, reason = "") {
-  const buttons = [...$("panel-actions").querySelectorAll("button"), ...$("dock").querySelectorAll("button")];
-  buttons.forEach(node => { node.disabled = true; });
-  const talking = ["discover", "confirm"].includes(kind());
-  try {
-    await api("/api/feedback", {
-      style: data.style,
-      session: data.session.id,
-      round: view().round,
-      decision,
-      picked: selectable() && decision !== "new" ? [...draft.picked] : [],
-      notes: talking ? draft.notes : {},
-      comment: reason || (talking ? draft.comment : ""),
-      request: talking ? "" : draft.request
-    });
-    await load();
-  } catch (error) {
-    toast(error.message, "error");
-    buttons.forEach(node => { node.disabled = false; });
-  }
-}
-
-// ---------- stage: what the user looks at ----------
-
-function renderStage() {
-  const current = view();
-  const stage = $("stage-inner");
-  const place = data.session ? `${data.style}|${data.session.id}` : null;
-  if (appeared.place !== place) appeared = { place, keys: new Set(), primed: false };
-  if (!data.session) return fill(stage, ...overviewStage());
-  if (!current) return fill(stage, workingNote(t("Getting ready")));
-  const stages = { discover: discoverStage, sample: boardStage, confirm: confirmStage, generate: boardStage, model: boardStage };
-  fill(stage, ...stages[current.kind](current));
-  appeared.primed = true;
-}
-
-// " enter" for a thing the stage shows for the first time since the session opened, so it comes in with a motion.
-function entering(key) {
-  const fresh = !appeared.keys.has(key);
-  appeared.keys.add(key);
-  return fresh && appeared.primed ? " enter" : "";
-}
-
-function overviewStage() {
-  const overview = data.overview;
-  const references = overview.references.map(path => ({ path, name: `${data.style}-${fileName(path)}`, info: [] }));
-  const made = [...data.archive].reverse();
-  const madeItems = made.map(item => lightboxFromArchive({ ...item, style: data.style }));
-  const addTile = h("label", { class: "add-tile", title: t("Upload images to add to references") }, [h("span", { html: icon("plus") }), h("small", { text: t("Add reference") })]);
-  const upload = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: true });
-  upload.addEventListener("change", async () => {
-    for (const file of upload.files) {
-      try { await api("/api/references/add", { style: data.style, name: file.name, data: await readFile(file) }); }
-      catch (error) { toast(error.message, "error"); }
-    }
-    upload.value = "";
-    load();
-  });
-  addTile.append(upload);
-  return [
-    sectionTitle(t("References"), tn("{count} image", "{count} images", references.length)),
-    h("div", { class: "grid compact" }, [
-      ...references.map((item, index) => imageFrame(item.path, {
-        fit: "fill", lazy: false, onClick: () => openLightbox(references, index),
-        tools: [tool("close", t("Remove from references"), () => removeReference(item.path))]
-      })),
-      addTile
-    ]),
-    sectionTitle(t("Recent images"), made.length ? h("a", { href: `#/archive/${encodeURIComponent(data.style)}`, text: t("See in the archive") }) : null),
-    made.length ? h("div", { class: "grid compact" }, made.slice(0, 18).map((item, index) => imageFrame(item.file, {
-      fit: "fill", onClick: () => openLightbox(madeItems, index),
-      tools: [
-        tool("reference", t("Add to references"), () => addToReferences(data.style, item.file)),
-        tool("download", t("Download"), null, { href: fileUrl(item.file), download: `${data.style}-${fileName(item.file)}` })
-      ]
-    }))) : emptyState({ text: t("No images yet. Start with New image or New ideation on the left.") })
-  ];
-}
-
-// Any image of a confirmed style can be added to its references wherever it is shown.
-function lightboxItems(candidates) {
-  const adds = data.overview.confirmed;
-  return candidates.map(candidate => ({
-    path: candidate.path,
-    name: `${data.style}-${fileName(candidate.path)}`,
-    add: adds ? { style: data.style, path: candidate.path } : null,
-    info: [[t("Request"), candidate.request], [t("Agent's note"), candidate.description], [t("My note"), candidate.note], [t("Review"), candidate.review], madeWith(candidate), [t("Prompt"), candidate.prompt, true]]
-  }));
-}
-
-function messageNode(who, children, key = null) {
-  return h("div", { class: `message ${who}${key ? entering(key) : ""}` }, [h("div", { class: "avatar", text: who === "user" ? t("Me") : "AS" }), h("div", { class: "message-body" }, children)]);
-}
-
-function thumbRow(candidates) {
-  const items = lightboxItems(candidates);
-  return h("div", { class: "thumbs" }, candidates.map((candidate, index) => thumb(candidate.path, { picked: candidate.picked, title: candidate.description || t("Enlarge"), onClick: () => openLightbox(items, index) })));
-}
-
-// What the user said about the images of a turn: each picked or noted image with its number, the pick, and the note.
-function answerMarks(candidates) {
-  const marked = candidates.filter(candidate => candidate.picked || candidate.note);
-  if (!marked.length) return null;
-  const items = lightboxItems(marked);
-  return h("div", { class: "marks" }, marked.map((candidate, index) => h("div", { class: "mark" }, [
-    thumb(candidate.path, { small: true, picked: candidate.picked, onClick: () => openLightbox(items, index) }),
-    h("div", {}, [
-      h("span", { class: "mark-head" }, [t("No. {number}", { number: pad(candidate.number) }), candidate.picked ? pill(t("Picked"), { tone: "accent", small: true }) : null]),
-      candidate.note ? h("span", { class: "mark-note", text: candidate.note }) : null
-    ])
-  ])));
-}
-
-function discoverStage(current) {
-  const seen = new Set();
-  const nodes = [];
-  for (const turn of current.thread) {
-    const isCurrent = turn.round === current.round;
-    const fresh = turn.candidates.filter(candidate => !seen.has(candidate.path));
-    turn.candidates.forEach(candidate => seen.add(candidate.path));
-    // Every image sits under the message it belongs to; a visit to another stage gets a message of its own.
-    // A visit to a board names what it drew since the last visit; one that drew nothing new shows the board's own question.
-    const requests = [...new Set(fresh.map(candidate => candidate.request).filter(Boolean))];
-    const visit = turn.kind !== "discover" && fresh.length > 0;
-    const text = visit ? [t("Drawn in {kind}", { kind: KIND_NAMES[turn.kind] }), ...requests.map(request => `· ${request}`)].join("\n") : turn.message;
-    const agentChildren = [text ? h("div", { class: `bubble${visit ? " stage-visit" : ""}`, text }) : null];
-    if (!isCurrent && fresh.length) agentChildren.push(thumbRow(fresh));
-    if (agentChildren.some(Boolean)) nodes.push(messageNode("agent", agentChildren, `agent|${turn.round}`));
-    if (isCurrent && current.candidates.length) nodes.push(candidateGrid(current.candidates));
-    const answered = turn.reply != null || turn.decision != null;
-    const marks = answered ? answerMarks(turn.candidates) : null;
-    if (turn.reply || turn.attachments.length || marks) {
-      const attachments = turn.attachments.map(path => ({ path, info: [] }));
-      nodes.push(messageNode("user", [turn.reply ? h("div", { class: "bubble", text: turn.reply }) : null, marks, turn.attachments.length ? h("div", { class: "thumbs" }, turn.attachments.map((path, index) => thumb(path, { onClick: () => openLightbox(attachments, index) }))) : null], `user|${turn.round}`));
-    }
-  }
-  const waiting = waitingText(current);
-  if (waiting) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), waiting])], `waiting|${current.round}`));
-  return [h("div", { class: "thread" }, nodes)];
-}
-
-function waitingText(current) {
-  if (!current.feedback) return "";
-  const decision = current.feedback.decision;
-  if (DRAWING.includes(decision)) return "";
-  return WAITING[decision] || CONTINUING[current.kind] || t("Preparing the next step");
-}
-
-function candidateGrid(candidates, { flush = false } = {}) {
-  const items = lightboxItems(candidates);
-  return h("div", { class: `candidates${flush ? " flush" : ""}` }, candidates.map((candidate, index) => candidateCard(candidate, index, items)));
-}
-
-// Picks and notes show on the cards while the answer is being written; once sent, the answer's message shows them.
-function candidateCard(candidate, index, items) {
-  const isPicked = answering() && draft.picked.has(candidate.number);
-  const note = answering() ? draft.notes[candidate.number] || "" : "";
-  const memo = selectable() && kind() !== "confirm" ? tool("memo", note || t("Note"), () => editNote(candidate), { on: Boolean(note) }) : null;
-  return h("div", { class: `candidate${selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}${entering(candidate.path)}`, "data-number": candidate.number }, [
-    imageFrame(candidate.path, {
-      number: candidate.number, check: selectable(),
-      onClick: () => selectable() ? togglePick(candidate.number) : openLightbox(items, index),
-      tools: [memo, tool("zoom", t("Enlarge"), () => openLightbox(items, index))]
-    }),
-    candidate.description ? h("div", { class: "label", text: candidate.description }) : null,
-    note ? field(t("My note"), note) : null
-  ]);
-}
-
-// A note travels with the answer whether or not the image is picked: a reason to pick, or what falls short.
-async function editNote(candidate) {
-  const text = await ask({ title: t("Note on No. {number}", { number: pad(candidate.number) }), description: t("Write what works or what falls short. Images you do not pick can have notes too."), value: draft.notes[candidate.number] || "", placeholder: t("e.g. I like the soft shadow"), confirm: t("Save") });
-  if (text == null) return;
-  if (text) draft.notes[candidate.number] = text;
-  else delete draft.notes[candidate.number];
-  renderStage();
-  syncSend();
-  syncSelection();
-}
-
-function togglePick(number) {
-  const on = !draft.picked.has(number);
-  // A generate round builds on one attempt; discover and confirm take any number.
-  if (on && kind() === "generate") draft.picked.clear();
-  if (on) draft.picked.add(number);
-  else draft.picked.delete(number);
-  document.querySelectorAll("[data-number]").forEach(node => node.classList.toggle("picked", draft.picked.has(Number(node.dataset.number))));
-  syncSelection();
-  syncComposerImages();
-  syncSend();
-}
-
-function confirmStage(current) {
-  const waiting = waitingText(current);
-  return [
-    current.note ? messageNode("agent", [h("div", { class: "bubble", text: current.note })]) : null,
-    h("div", { style: "height: 20px" }),
-    sectionTitle(t("Reference candidates"), tn("{count} image", "{count} images", current.candidates.length)),
-    candidateGrid(current.candidates, { flush: true }),
-    waiting ? h("div", { style: "margin-top: 20px" }, [workingNote(waiting)]) : null
-  ];
-}
-
-// A request on the board, with the attempt it was drawn from when the user picked one.
-function requestField(request, from, ordered) {
-  const base = from && ordered.find(candidate => candidate.path === from);
-  return h("div", { class: "entry-request" }, [
-    field(t("Request"), request || "-", { strong: true }),
-    base ? h("button", { class: "from", type: "button", title: t("Enlarge"), onclick: () => openLightbox(lightboxItems([base]), 0) }, [h("img", { src: fileUrl(base.path), alt: "" }), h("span", { text: t("From No. {number}", { number: pad(base.number) }) })]) : null
-  ]);
-}
-
-// Boards list images in the order they were drawn, the one being drawn last. Each card keeps its request on top,
-// what the agent has to say under it, scrolling when long, and opens the prompt on demand.
-function boardStage(current) {
-  const ordered = current.candidates;
-  const items = lightboxItems(ordered);
-  const isGenerate = current.kind === "generate";
-  const adds = data.overview.confirmed;
-  const entries = ordered.map((candidate, index) => {
-    const isPicked = answering() && draft.picked.has(candidate.number);
-    const facts = candidate.tool ? TOOL_NAMES[candidate.tool] : [candidate.model ? shortModel(candidate.model) : null, candidate.cost != null ? money(candidate.cost) : null].filter(Boolean).join(" · ");
-    return h("article", { class: `entry${isGenerate && selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}${entering(candidate.path)}`, "data-number": candidate.number }, [
-      imageFrame(candidate.path, {
-        number: candidate.number, check: isGenerate && selectable(),
-        onClick: () => isGenerate && selectable() ? togglePick(candidate.number) : openLightbox(items, index),
-        tools: [
-          tool("zoom", t("Enlarge"), () => openLightbox(items, index)),
-          adds ? tool("reference", t("Add to references"), () => addToReferences(data.style, candidate.path)) : null,
-          tool("download", t("Download"), null, { href: fileUrl(candidate.path), download: `${data.style}-${fileName(candidate.path)}` })
-        ]
-      }),
-      h("div", { class: "entry-info" }, [
-        requestField(candidate.request, candidate.refined_from, ordered),
-        h("div", { class: "entry-notes" }, [
-          candidate.description ? field(t("Agent's note"), candidate.description) : null,
-          candidate.review ? field(t("Review"), candidate.review) : null
-        ]),
-        h("div", { class: "entry-foot" }, [
-          h("span", { class: "meta", text: facts }),
-          candidate.prompt ? button(t("Prompt"), { small: true, variant: "ghost", iconName: "text", onClick: () => ask({ title: t("Prompt"), description: candidate.request || "", text: candidate.prompt, confirm: t("Close") }) }) : null
-        ])
-      ])
-    ]);
-  });
-
-  const decision = current.feedback && current.feedback.decision;
-  if (DRAWING.includes(decision)) {
-    entries.push(h("article", { class: `entry${entering(`pending|${current.round}`)}` }, [
-      h("div", { class: "pending-frame" }, [h("span", { class: "spinner" }), t("Drawing")]),
-      h("div", { class: "entry-info" }, [requestField(current.feedback.request, current.feedback.picked[0], ordered)])
-    ]));
-  }
-
-  const references = current.references.length ? [
-    sectionTitle(t("References"), tn("{count} image", "{count} images", current.references.length)),
-    h("div", { class: "thumbs" }, current.references.map((path, index, all) => thumb(path, { onClick: () => openLightbox(all.map(reference => ({ path: reference, info: [] })), index) }))),
-    h("div", { style: "height: 24px" })
-  ] : [];
-  const waiting = waitingText(current);
-  const title = { generate: t("Images made"), sample: t("Sample"), model: t("Drawn with {model}", { model: shortModel(current.model) }) }[current.kind];
-
-  return [
-    ...references,
-    sectionTitle(title, ordered.length ? tn("{count} image", "{count} images", ordered.length) : ""),
-    entries.length ? h("div", { class: "entries" }, entries) : emptyState({ text: isGenerate ? t("Write what you want to make below.") : t("Write what to draw below.") }),
-    waiting ? h("div", { style: "margin-top: 20px" }, [workingNote(waiting)]) : null
-  ];
-}
-
-// ---------- panel width ----------
-
-function bindResize() {
-  const range = [300, 560];
-  const set = width => document.documentElement.style.setProperty("--panel", `${Math.min(range[1], Math.max(range[0], width))}px`);
-  $("panel-resize").addEventListener("pointerdown", event => {
-    event.preventDefault();
-    document.body.classList.add("resizing");
-    const move = moved => set(moved.clientX);
-    const up = () => {
-      document.body.classList.remove("resizing");
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      try { localStorage.setItem("panel-width", parseInt(getComputedStyle(document.documentElement).getPropertyValue("--panel"))); } catch {}
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  });
-}
-try { const saved = Number(localStorage.getItem("panel-width")); if (saved) document.documentElement.style.setProperty("--panel", `${saved}px`); } catch {}
-
-go();
-setInterval(() => { if ($("modal").hidden && $("menu").hidden) load(); }, 3000);
+// Page modules in later scripts register before the page starts.
+document.addEventListener("DOMContentLoaded", () => {
+  go();
+  setInterval(() => { if (!loading && $("modal").hidden && $("menu").hidden && document.visibilityState === "visible") load(); }, 3000);
+});

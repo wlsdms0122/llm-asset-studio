@@ -24,7 +24,14 @@ const ICONS = {
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
   languages: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
-  text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'
+  text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  minus: '<path d="M5 12h14"/>',
+  fit: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+  open: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>'
 };
 
 const $ = id => document.getElementById(id);
@@ -63,6 +70,14 @@ function button(label, { variant = "", small = false, grow = false, onClick, tit
 
 function iconButton(iconName, title, onClick, { variant = "", small = false, disabled, hidden } = {}) {
   return h("button", { class: ["button", "icon-only", variant, small && "small"].filter(Boolean).join(" "), type: "button", title, "aria-label": title, disabled, hidden, onclick: onClick, html: icon(iconName) });
+}
+
+// A link that looks like a button: going to another page, such as a style or a node on the canvas.
+function linkButton(label, href, { variant = "", small = true, iconName = null, title = null } = {}) {
+  const node = h("a", { class: ["button", variant, small && "small"].filter(Boolean).join(" "), href, title });
+  if (iconName) node.innerHTML = icon(iconName);
+  node.append(h("span", { text: label }));
+  return node;
 }
 
 // An icon button that opens a menu of choices under itself, such as the theme or the language.
@@ -119,7 +134,8 @@ const COMPOSER_MAX = 240;
 // The box grows and shrinks smoothly with the text and the images, and Cmd or Ctrl+Enter sends.
 // node.send is the send button, for the page to enable; node.setImages([{ key, node }]) shows the images that go with
 // the message, bringing new ones in and taking removed ones out with a motion, and keeping the rest in place.
-function composer({ value = "", placeholder = "", sendTitle, onInput = null, onSend, attach = null }) {
+// tools: controls that shape the message, placed after attach (a style picker, a short note on what send does).
+function composer({ value = "", placeholder = "", sendTitle, onInput = null, onSend, attach = null, tools = [] }) {
   const input = h("textarea", { rows: 1, placeholder, value });
   const send = h("button", { class: "button primary icon-only composer-send", type: "button", title: sendTitle, "aria-label": sendTitle, html: icon("send"), onclick: onSend });
   // The height a text box needs is measured on a hidden copy, so the box itself goes from one height to the next.
@@ -140,8 +156,9 @@ function composer({ value = "", placeholder = "", sendTitle, onInput = null, onS
   });
   const thumbs = h("div", { class: "thumbs" });
   const images = h("div", { class: "composer-images" }, [thumbs]);
-  const node = h("div", { class: "composer" }, [images, input, h("div", { class: "composer-bar" }, [attach, h("span", { class: "grow" }), send])]);
+  const node = h("div", { class: "composer" }, [images, input, h("div", { class: "composer-bar" }, [attach, ...tools, h("span", { class: "grow" }), send])]);
   node.send = send;
+  node.input = input;
   node.setImages = items => {
     const keys = new Set(items.map(item => item.key));
     for (const child of [...thumbs.children]) {
@@ -172,7 +189,7 @@ function composer({ value = "", placeholder = "", sendTitle, onInput = null, onS
 
 // ---------- labels ----------
 
-// tone: "" (neutral), accent, success. dot: null, "static", "live".
+// tone: "" (neutral), accent, success, danger. dot: null, "static", "live".
 function pill(text, { tone = "", dot = null, small = false } = {}) {
   return h("span", { class: ["pill", tone, small && "small"].filter(Boolean).join(" ") }, [dot ? h("span", { class: `dot${dot === "live" ? " live" : ""}` }) : null, text]);
 }
@@ -211,9 +228,10 @@ function imageFrame(path, { fit = "natural", onClick = null, number = null, chec
 }
 
 // badge: a short label over the image's lower left corner, such as the number of a picked attempt.
-function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null, badge = null } = {}) {
+// src: an address other than the workspace file, such as a picked file not uploaded yet.
+function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null, badge = null, src = null } = {}) {
   return h(remove ? "div" : "button", { class: ["thumb", picked && "picked", small && "small"].filter(Boolean).join(" "), type: remove ? null : "button", title, onclick: onClick }, [
-    h("img", { src: fileUrl(path), alt: "", loading: "lazy" }),
+    h("img", { src: src || fileUrl(path), alt: "", loading: "lazy" }),
     badge ? h("span", { class: "badge", text: badge }) : null,
     remove ? h("button", { class: "remove", type: "button", title: t("Remove"), html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
   ]);
@@ -271,13 +289,15 @@ let settleModal = null;
 // input: "text" (one line), "long" (a paragraph), or null for a plain confirmation.
 // choices: [{ value, title, detail?, aside?, specs? }] shows a list to pick one from; specs are [label, value] pairs. Resolves to the answer, or null when cancelled.
 // text: a long text to read, such as a prompt, shown wide with only the confirm button.
-function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null }) {
+// wide: a long text to edit, such as a brief, in a wide and tall box.
+function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null, wide = false }) {
   if (text != null) input = null;
   $("modal-title").textContent = title;
   $("modal-description").textContent = description;
   $("modal-document").hidden = text == null;
   $("modal-document").textContent = text || "";
-  $("modal-form").classList.toggle("wide", text != null);
+  $("modal-form").classList.toggle("wide", text != null || wide);
+  $("modal-form").classList.toggle("editing", wide);
   $("modal-cancel").hidden = text != null;
   $("modal-input").hidden = !input;
   $("modal-input").value = value;

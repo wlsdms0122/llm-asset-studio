@@ -256,7 +256,7 @@ def server(workspace, node):
                 return error.code, json.loads(error.read() or b"{}")
 
         state = lambda path: json.loads(get(path)[1])
-        for page in ("/", "/ui.js", "/ui.css", "/app.js", "/app.css", "/canvas.js", "/i18n.js"):
+        for page in ("/", "/ui.js", "/ui.css", "/app.js", "/app.css", "/canvas.js", "/style.js", "/i18n.js"):
             check(f"serves {page}", get(page)[0] == 200)
         listed = state("/api/projects")
         check("lists projects with whether an agent is attached", [project["name"] for project in listed["projects"]] == ["demo", "other"] and listed["agent"]["seen"] is not None)
@@ -301,7 +301,7 @@ def words():
     web = ENGINE.parent / "web"
     korean = set(re.findall(r'^  ("(?:[^"\\]|\\.)*"): ', (web / "i18n.js").read_text(), re.M))
     shown = set()
-    for name in ("app.js", "ui.js", "canvas.js"):
+    for name in ("app.js", "ui.js", "canvas.js", "style.js"):
         source = (web / name).read_text()
         shown.update(re.findall(r'\bt\(("(?:[^"\\]|\\.)*")', source))
         for singular, plural in re.findall(r'\btn\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")', source):
