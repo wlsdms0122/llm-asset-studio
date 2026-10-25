@@ -4,8 +4,8 @@
 The server writes only records, through the engine's modules: projects, styles and the user's own changes to them
 (references, models, extends, restoring a revision, accepting or rejecting a proposal), probe runs asked for, nodes
 (a generation asked for, a tool run here, an upload), the canvas layout, threads and the user's answers. What is
-written in words (a brief, a style's rules, its probes and prompting) the agent writes, from a thread. It never generates: the agent waits with `open-package watch`, does the work, and publishes;
-the open page follows on its own. A tool node runs here, since it draws nothing and costs nothing.
+written in words (a brief, a style's rules, its probes and prompting) the agent writes, from a thread. The server never
+generates: the agent waits with `open-package watch`, does the work, and publishes; the open page follows on its own. A tool node runs here, since it draws nothing and costs nothing.
 """
 
 import argparse

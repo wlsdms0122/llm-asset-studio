@@ -218,7 +218,10 @@ def lifecycle(workspace):
     brief = out(workspace, "thread.py", "open", "projects/demo", "project", "--message", "icons for a demo app")
     check("a project thread starts with the user's words", brief in out(workspace, "watch.py", "--once").split())
     (workspace / "projects/demo/project.md").write_text("# demo\n\nIcons for a demo app.\n")
-    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", brief), "--note", "brief written")
+    written = out(workspace, "thread.py", "next", brief)
+    refused = engine(workspace, "thread.py", "publish", written, "--note", "brief written", "--proposal", "p1", ok=False)
+    check("a project thread has no style to propose changes to", refused.returncode != 0 and "Traceback" not in refused.stderr)
+    engine(workspace, "thread.py", "publish", written, "--note", "brief written")
     shown = json.loads(out(workspace, "thread.py", "show", brief))
     check("a project thread shows the brief the agent wrote", shown["style"] is None and shown["rounds"][-1]["brief"].startswith("# demo") and shown["rounds"][-1]["spec"] is None)
     return node
@@ -287,6 +290,9 @@ def server(workspace, node):
         check("saves the canvas", post("/api/canvas", {"project": "demo", "positions": {"n1": [10, 20], "zz": [0, 0]}})[1]["positions"] == {"n1": [10.0, 20.0]})
         frames = post("/api/canvas", {"project": "demo", "frames": [{"title": " icons ", "nodes": ["n1", "n2", "zz"]}, {"title": "again", "nodes": ["n1"]}]})[1]["frames"]
         check("a node is in one frame at most and an empty frame is gone", frames == [{"title": "icons", "nodes": ["n1", "n2"]}])
+        canvas = json.loads((workspace / "projects/demo/canvas.json").read_text())
+        (workspace / "projects/demo/canvas.json").write_text(json.dumps({**canvas, "frames": [{"title": "icons", "nodes": ["n1", "gone"]}]}))
+        check("a canvas read leaves out nodes that are gone", state("/api/project?project=demo")["canvas"]["frames"] == [{"title": "icons", "nodes": ["n1"]}])
         status, opened = post("/api/threads", {"project": "demo", "style": "glyph", "message": "softer shadows"})
         check("a style thread opened with the user's words is the agent's turn", status == 200 and not state(f"/api/thread?project=demo&thread={opened['thread']}")["waiting"])
         status, opened = post("/api/threads", {"project": "demo", "kind": "project"})

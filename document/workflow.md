@@ -236,7 +236,6 @@ open-package style restore $S <revision>
 open-package style rename $S <new name>
 open-package proposal accept $S p3
 open-package thread rename $T "<the name the user gave>"
-open-package project subject-add <project> <image>
 
 # conversation surface
 open-package sheet $T                                 # also a node or a run

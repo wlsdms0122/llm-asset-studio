@@ -24,6 +24,7 @@ const KO = {
   "Draws nothing itself. Lends rules such as brand colors to the styles that build on it.": "직접 그리지 않아요. 브랜드 색 같은 규칙을 이어받는 스타일에 빌려줘요.",
   "Group name": "그룹 이름",
   "Group": "그룹으로 묶기",
+  "Untitled group": "이름 없는 그룹",
   "Hide review": "검수 숨기기",
   "How every image drawn with it looks: the medium, line, color, light, and texture.": "이 스타일로 그리는 모든 그림의 생김새예요. 재료, 선, 색, 빛, 질감 같은 것들이요.",
   "Lends its rules to the styles that build on it.": "이어받는 스타일에 규칙을 빌려줘요.",

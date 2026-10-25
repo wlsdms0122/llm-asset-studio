@@ -340,7 +340,7 @@ function renderInspector() {
   const panel = $("board-inspector");
   if (!panel) return;
   const nodes = [...board.selected].map(nodeById).filter(Boolean);
-  const signature = signatureOf({ nodes, reviews: nodes.map(node => board.reviews.has(node.id)), frames: board.data.canvas.frames });
+  const signature = signatureOf({ nodes, reviews: nodes.map(node => board.reviews.has(node.id)), frames: board.data.canvas.frames, agent: agentAttached() });
   if (signature === board.inspectorSignature) return;
   board.inspectorSignature = signature;
   panel.hidden = !nodes.length;
@@ -614,7 +614,7 @@ function drawFrames() {
       oncontextmenu: event => { event.preventDefault(); openFrameMenu(index, event); }
     }, [
       h("div", { class: "canvas-frame-head" }, [
-        h("span", { class: "canvas-frame-title", text: frame.title || t("Group"), title: frame.title, ondblclick: () => renameFrame(index) }),
+        h("span", { class: "canvas-frame-title", text: frame.title || t("Untitled group"), title: frame.title, ondblclick: () => renameFrame(index) }),
         tool("more", t("More"), event => openFrameMenu(index, event), { quiet: true })
       ])
     ]);

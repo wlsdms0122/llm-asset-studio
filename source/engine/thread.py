@@ -174,6 +174,8 @@ class Thread:
         if len(descriptions) not in (0, len(candidates)):
             raise RecordError(f"{len(descriptions)} descriptions for {len(candidates)} images")
         style = self.style
+        if proposals and not style:
+            raise RecordError(f"thread {self.id} has no style to propose changes to")
         for identifier in proposals:
             from proposal import Proposal
             Proposal(style, identifier)

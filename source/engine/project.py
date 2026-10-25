@@ -115,24 +115,25 @@ class Project:
 
     def canvas(self):
         canvas = read_json(self.canvas_file, {})
-        return {"positions": canvas.get("positions", {}), "frames": canvas.get("frames", [])}
+        return self.laid_out(canvas.get("positions", {}), canvas.get("frames", []))
 
     def save_canvas(self, positions=None, frames=None):
-        canvas = self.canvas()
-        known = {node.id for node in self.nodes()}
-        if positions is not None:
-            canvas["positions"] = {key: [float(value[0]), float(value[1])] for key, value in positions.items() if key in known}
-        if frames is not None:
-            # A node is in one frame at most, and a frame left with no node is gone.
-            taken = set()
-            canvas["frames"] = []
-            for frame in frames:
-                members = [key for key in frame.get("nodes", []) if key in known and key not in taken]
-                taken.update(members)
-                if members:
-                    canvas["frames"].append({"title": " ".join(str(frame.get("title", "")).split()), "nodes": members})
+        saved = read_json(self.canvas_file, {})
+        canvas = self.laid_out(saved.get("positions", {}) if positions is None else positions, saved.get("frames", []) if frames is None else frames)
         write_json(self.canvas_file, canvas)
         return canvas
+
+    def laid_out(self, positions, frames):
+        """The canvas over the nodes that exist: a node is in one frame at most, and a frame left with no node is gone."""
+        known = {node.id for node in self.nodes()}
+        taken = set()
+        kept = []
+        for frame in frames:
+            members = [key for key in frame.get("nodes", []) if key in known and key not in taken]
+            taken.update(members)
+            if members:
+                kept.append({"title": " ".join(str(frame.get("title", "")).split()), "nodes": members})
+        return {"positions": {key: [float(value[0]), float(value[1])] for key, value in positions.items() if key in known}, "frames": kept}
 
     # Changes
 
