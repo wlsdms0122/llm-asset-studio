@@ -55,10 +55,13 @@ class Proposal:
             raise RecordError("a proposal changes at least one file")
         tracked = set(style.tree())
         for path in changes:
-            if path.startswith(("/", "..")) or Path(path).parts[0] in ("proposals", "runs") or path in ("revisions.jsonl", "references/set.json"):
+            parts = Path(path).parts
+            if not parts or Path(path).is_absolute() or any(part in ("", ".", "..") or part.startswith(".") for part in parts) or parts[0] in ("proposals", "runs") or path in ("revisions.jsonl", "references/set.json"):
                 raise RecordError(f"{path} is not a file of the style")
             if changes[path] is None and path not in tracked:
                 raise RecordError(f"{style.name} has no {path} to remove")
+        if changes.get("style.json") is not None:
+            style.check_extends(json.loads(changes["style.json"]).get("extends", []))
         directory = workspace.claim_number(style.path / "proposals", "p")
         record = {
             "id": directory.name,
@@ -104,6 +107,8 @@ class Proposal:
             raise RecordError(f"proposal {self.id} is already {self.record['status']}")
         if not self.applies():
             raise RecordError(f"{self.style.name} changed since proposal {self.id} was written; the agent writes it again")
+        if self.record["changes"].get("style.json"):
+            self.style.check_extends(json.loads(read_object(self.record["changes"]["style.json"])).get("extends", []))
         for path, content in self.record["changes"].items():
             target = self.style.path / path
             if content is None:

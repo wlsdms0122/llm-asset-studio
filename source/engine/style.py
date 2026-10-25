@@ -199,17 +199,16 @@ class Style:
     def revision(self, summary=None, source="auto"):
         """The current revision's number, recorded first when the style or a style it extends changed since the last."""
         parents = {base.name: base.revision() for base in self.bases()}
-        files = self.tree()
         log = self.path / "revisions.jsonl"
         with log.open("a+", encoding="utf-8") as file:
             fcntl.flock(file, fcntl.LOCK_EX)
+            # Each file is read once and stored under the hash of what was read, so the record names stored objects.
+            files = {path: put_object((self.path / path).read_bytes()) for path in self.tree()}
             file.seek(0)
             entries = [json.loads(line) for line in file.read().splitlines() if line.strip()]
             last = entries[-1] if entries else None
             if last and last["files"] == files and last["parents"] == parents:
                 return last["number"]
-            for path in files:
-                put_object((self.path / path).read_bytes())
             entry = {
                 "number": len(entries) + 1,
                 "time": timestamp(),
@@ -244,6 +243,8 @@ class Style:
         if not 1 <= number <= len(entries):
             raise RecordError(f"{self.name} has no revision {number}")
         files = entries[number - 1]["files"]
+        if "style.json" in files:
+            self.check_extends(json.loads(read_object(files["style.json"])).get("extends", []))
         for path in self.tree():
             if path not in files:
                 (self.path / path).unlink()
@@ -276,16 +277,22 @@ class Style:
         return entries[-1]["number"]
 
     def stale_bases(self):
-        """The bases that changed since this style's last revision, so its prompting files and probes are behind them."""
+        """The bases that changed since this style's own files last changed, so its prompting files are behind them.
+        A revision recorded only because a base changed does not clear it; the agent's next edit of the style does."""
         entries = self.revisions()
-        parents = entries[-1]["parents"] if entries else {}
+        own = None
+        for earlier, entry in zip([None, *entries], entries):
+            if earlier is None or earlier["files"] != entry["files"]:
+                own = entry
+        parents = own["parents"] if own else {}
         return [base.name for base in self.bases() if parents.get(base.name) is None or parents[base.name] != base.recorded()]
 
     # Changes the user makes
 
     def edit(self, path, text):
         """The user's own edit of a text file of the style."""
-        if path not in ("style.md", "probes.md") and not (path.startswith("prompting/") and path.endswith(".md") and (self.path / path).is_file()):
+        target = (self.path / path).resolve()
+        if path not in ("style.md", "probes.md") and not (target.parent == (self.path / "prompting").resolve() and target.suffix == ".md" and target.is_file()):
             raise RecordError(f"{path} is not a text file of the style")
         (self.path / path).write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         return self.revision(f"edited {path}", "owner")
@@ -314,12 +321,16 @@ class Style:
         remove_image(self.reference_folder, name)
         return self.revision(f"removed reference {name}", "owner")
 
-    def set_extends(self, names):
-        names = list(dict.fromkeys(names))
+    def check_extends(self, names):
+        """Bases are styles of the project, and none of them extends this style, directly or through others."""
         for name in names:
             base = self.project.style(name)
             if base.name == self.name or self.name in [style.name for style in base.chain()]:
                 raise RecordError(f"{self.name} cannot extend {name}: it would extend itself")
+
+    def set_extends(self, names):
+        names = list(dict.fromkeys(names))
+        self.check_extends(names)
         self.write_config(extends=names)
         return self.revision(f"extends {', '.join(names) or 'nothing'}", "owner")
 
@@ -346,6 +357,8 @@ class Style:
         return target
 
     def delete(self):
+        if any(node.style == self.name and node.kind == "generation" and node.result() is None for node in self.project.nodes()):
+            raise RecordError(f"the agent has generations of {self.name} waiting; delete them or wait until they are drawn")
         if self.dependents():
             raise RecordError(f"{', '.join(style.name for style in self.dependents())} extend {self.name}; change them first")
         for thread in self.project.threads():
@@ -390,7 +403,10 @@ class Snapshot:
     def bases(self):
         bases = []
         for name in self.config()["extends"]:
-            base = self.style.project.style(name)
+            base = Style.named(self.style.project, name)
+            if not base.exists():
+                # A revision recorded before its base was renamed or deleted.
+                continue
             bases.append(base.snapshot(self.parents[name]) if self.parents and name in self.parents else base.snapshot())
         return bases
 
@@ -538,9 +554,16 @@ def add_image(folder, source):
     last = folder / ".last"
     used = [int(path.stem) for path in images_in(folder) if path.stem.isdigit()]
     number = max([int(read_text(last) or 0), *used]) + 1
-    target = folder / f"{number:02d}{source.suffix.lower()}"
-    shutil.copy2(source, target)
-    last.write_text(str(number))
+    content = source.read_bytes()
+    while True:
+        target = folder / f"{number:02d}{source.suffix.lower()}"
+        try:
+            with open(target, "xb") as file:
+                file.write(content)
+            break
+        except FileExistsError:
+            number += 1
+    last.write_text(str(max(number, int(read_text(last) or 0))))
     return target
 
 

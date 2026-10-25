@@ -175,6 +175,16 @@ def lifecycle(workspace):
     materialized = workspace / "materialized"
     engine(workspace, "style.py", "materialize", "projects/demo/styles/branded", str(materialized))
     check("materialize writes the effective style and the references of the base it draws with", "mint" in (materialized / "style.md").read_text() and len(list((materialized / "references").glob("*.png"))) == 2)
+    (workspace / "escape.md").write_text("x")
+    check("a proposal cannot reach outside the style", engine(workspace, "proposal.py", "propose", style_path, "--summary", "s", "--reason", "r", "--set", f"references/../../../../../escaped.md={workspace / 'escape.md'}", ok=False).returncode != 0 and not (workspace / "escaped.md").exists())
+    out(workspace, "style.py", "new", "demo", "scratch")
+    engine(workspace, "style.py", "extends", "projects/demo/styles/scratch", "palette")
+    engine(workspace, "style.py", "extends", "projects/demo/styles/scratch")
+    engine(workspace, "style.py", "extends", "projects/demo/styles/palette", "scratch")
+    looping = len((workspace / "projects/demo/styles/scratch/revisions.jsonl").read_text().splitlines()) - 1
+    check("restoring a revision that would make extends loop is refused", engine(workspace, "style.py", "restore", "projects/demo/styles/scratch", str(looping), ok=False).returncode != 0)
+    engine(workspace, "style.py", "extends", "projects/demo/styles/palette")
+    engine(workspace, "style.py", "delete", "projects/demo/styles/scratch")
     check("deleting an extended style is refused", engine(workspace, "style.py", "delete", "projects/demo/styles/palette", ok=False).returncode != 0)
 
     if sys.platform == "darwin" and shutil.which("swift"):
@@ -272,6 +282,8 @@ def server(workspace, node):
         check("saves the canvas", post("/api/canvas", {"project": "demo", "positions": {"n1": [10, 20], "zz": [0, 0]}})[1]["positions"] == {"n1": [10.0, 20.0]})
         status, opened = post("/api/threads", {"project": "demo", "style": "glyph", "message": "softer shadows"})
         check("a style thread opened with the user's words is the agent's turn", status == 200 and not state(f"/api/thread?project=demo&thread={opened['thread']}")["waiting"])
+        (workspace / "victim.md").write_text("keep")
+        check("an edit cannot reach outside the style", post("/api/styles/edit", {"project": "demo", "style": "glyph", "file": "prompting/../../../../../victim.md", "text": "x"})[0] == 400 and (workspace / "victim.md").read_text() == "keep")
         check("edits style.md as a revision", post("/api/styles/edit", {"project": "demo", "style": "glyph", "file": "style.md", "text": "# glyph\n\nedited\n"})[0] == 200 and state("/api/style?project=demo&style=glyph")["revisions"][-1]["source"] == "owner")
         check("asks for a probe run", post("/api/runs", {"project": "demo", "style": "glyph"})[0] == 200)
         status, created = post("/api/styles", {"project": "demo", "name": "새-스타일"})

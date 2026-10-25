@@ -14,6 +14,7 @@ import binascii
 import io
 import json
 import mimetypes
+import tempfile
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -110,8 +111,9 @@ def style_detail(style):
         "dependents": [dependent.name for dependent in style.dependents()],
         "proposals": [proposal.view() for proposal in Proposal.all(style)],
         "runs": runs,
-        # Probes are stale when the newest finished run shows a revision other than the current one.
-        "probes_stale": bool(runs) and next((run["revision"] for run in reversed(runs) if run["status"] == "done"), None) != current,
+        # Probes are stale when the newest finished run of a revision shows one other than the current; a run of a
+        # proposal not accepted shows no revision.
+        "probes_stale": next((run["revision"] for run in reversed(runs) if run["status"] == "done" and run["revision"] is not None), current) != current,
         "leaks": leaks(style.project, style.name),
         "threads": [thread.summary() for thread in style.project.threads() if thread.record["style"] == style.name]
     }
@@ -316,9 +318,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise RecordError("no such image")
             return add(source)
         name, content = self.upload(body)
-        upload = workspace.HOME / ".uploads" / name
-        upload.parent.mkdir(exist_ok=True)
-        upload.write_bytes(content)
+        folder = workspace.HOME / ".uploads"
+        folder.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=folder, suffix=Path(name).suffix, delete=False) as file:
+            file.write(content)
+        upload = Path(file.name)
         try:
             return add(upload)
         finally:

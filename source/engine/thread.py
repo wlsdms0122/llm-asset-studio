@@ -260,13 +260,15 @@ class Round:
             "surface": surface,
             "time": timestamp()
         }
+        # The answer is claimed first, so a second answer to the same round fails before it can make a node.
+        write_once(self.directory / "feedback.json", feedback)
         if decision == "generate":
             # The brief comes down to the canvas as a generation node; the thread keeps going beside it.
             brief = self.thread.brief()
             heading = next((line for line in brief.splitlines() if line.strip()), "").lstrip("# ").strip()
             node = Node.create(self.project, "generation", f"{heading}\n\n{brief}".strip() if heading else brief, self.thread.record["style"], thread=self.thread.id, surface=surface)
             feedback["node"] = node.id
-        write_once(self.directory / "feedback.json", feedback)
+            write_json(self.directory / "feedback.json", feedback)
         return feedback
 
     def attach(self, name, content):
