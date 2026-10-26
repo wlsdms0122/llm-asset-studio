@@ -30,12 +30,13 @@ How the agent turns `style.md` and a request into a prompt for an image model. W
 
 ## Reference images
 
-- References carry what words carry badly: palette, finish, the feel of a medium. They also carry subject, composition, and objects along with it (content leakage). State the subject's colors, counts, and layout in every prompt, and say "do not copy their subjects, colors, or layout".
+- References carry what words carry badly: palette, finish, the feel of a medium. They also carry subject, composition, and objects along with it (content leakage). So every reference goes out with its role, and the prompt says what to take from it and what to leave, from its annotation (`workflow.md`, References).
+- Roles: a style reference lends how it is drawn; a subject reference lends the shape of one subject; a composition reference lends layout, pose, viewpoint, and crop. A text reference is not attached: its values go into the prompt's words. Name each attached image with its role and its take and ignore in the form the model reads (by position, by what it shows, or through a separate style channel; see `models.md` and the style's prompting file): "Images 1 to 4 are style references: take their rendering, light, and texture; do not take their subjects, colors, or layout. Image 5 is a composition reference: take the subject's pose and the crop; do not take how it is drawn."
+- Style references go first, then subject references, then composition references.
+- State the subject's colors, counts, and layout in every prompt, so nothing is left for a reference to fill.
 - With one or two references a model copies them; with several that share only the rendering, it takes the rendering.
-- Name each reference by what it shows ("the crayon drawings of a monstera and a watering can are style references"), or by position where the model expects that (see `models.md`). Style references go first.
-- A reference for one property (a pose, a composition) is attached after the style references, with the property it is for named and the rest ruled out.
+- A reference that shows nearly the same subject as the request wins over the words: its pose, angle, and size come through however the prompt measures them. Leave it out of that generation and record why on the node.
 - A reference with a defect teaches the defect.
-- A reference that shows nearly the same subject as the request wins over the words: its pose, angle, and size come through however the prompt measures them. When that happens, the words alone will not fix it.
 - Exact geometry (equal sizes, set ratios, a precise rotation) is not something an image model guarantees. A mark made of a few geometric shapes is constructed in code instead, with the style's colors, and offered next to the generated image.
 
 ## Reading results

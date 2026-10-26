@@ -10,7 +10,7 @@ open-package models --free
 curl -s https://openrouter.ai/api/v1/images/models/<id>/endpoints
 ```
 
-The real cost of every call comes back in `usage.cost` and is written to the style's ledger.
+The real cost of every call comes back in `usage.cost` and is written to `calls.jsonl` beside the images it made.
 
 ## Access
 
@@ -20,14 +20,14 @@ The real cost of every call comes back in `usage.cost` and is written to the sty
 
 ## Choosing a model
 
-- Discovery and ideation candidates: the draft model, below.
-- Sample and generate: one model per style, chosen for how well it renders that kind of look, whether it takes references, and price. Seedream 5.0 Flash is the current default.
+- Drafts in a thread (readings of a style, ideas for an image): the draft model, below.
+- Probes and generation: one model per style, chosen for how well it renders that kind of look, whether it takes references, and price. Seedream 5.0 Flash is the current default.
 - Comparing expensive models (GPT Image 2.5, Recraft V4 Styles, Nano Banana 2.1) is worth it only when a style's first-try acceptance is low.
 - New models are unstable for their first days (one had about 43% availability on launch day). Prefer a model that has been out a few weeks.
 
 ## The draft model
 
-Discovery and ideation candidates are drafts. They show which way a style or an image goes, not its quality, so they come from the cheapest model that can show it, not from the style's model. Free models come and go, so the draft model is chosen when a session's first drafts are due:
+Drafts in a thread are generation nodes drawn with the draft model (`node.py add --draft <model>`). They show which way a style or an image goes, not its quality, so they come from the cheapest model that can show it, not from the style's model. Free models come and go, so the draft model is chosen when a thread's first drafts are due:
 
 1. `open-package models --free` lists the image models that are free today. If one can show what the drafts need, it is the draft model.
 2. Otherwise (the command exits 1 when nothing is free; exit 3 means some prices could not be read, so it is run again), the draft model is the first of these that `open-package models` still lists and that can show it:
@@ -35,7 +35,7 @@ Discovery and ideation candidates are drafts. They show which way a style or an 
    - `openai/gpt-image-2` with `--quality low`: about $0.006, up to 16 references, up to 10 a call
    - `recraft/recraft-v4.1-flash`: $0.007, text only, up to 6 a call
 
-A draft built from the user's images needs a model that takes references. A paid draft model is used only after the user agrees: the agent names the model and the price of one image, and the user's yes covers that session's drafts. When a candidate leaves the list, or a cheaper one that takes references and reads a style's rendering appears, this list is updated.
+A draft built from the user's images needs a model that takes references. A paid draft model is used only after the user agrees: the agent names the model and the price of one image, and the user's yes covers that thread's drafts. When a candidate leaves the list, or a cheaper one that takes references and reads a style's rendering appears, this list is updated.
 
 ## Facts (checked 2026-10-09 to 10-11)
 
@@ -65,12 +65,12 @@ A draft built from the user's images needs a model that takes references. A paid
 - Recraft: three to six words go interpretive, long prompts are followed closely. Styles take the style images in their own channel and the text describes only the subject.
 - Hy: references as `@Image1`. Krea: style references in their own channel.
 
-## Adding a model to a confirmed style
+## Adding a model to a style
 
-A model session (`workflow.md`, Prompting per model) writes the model's prompting file and tries it with the user. To write it:
+Adding a model (`workflow.md`, Prompting per model): the agent writes the model's prompting file and records the revision, and the user switches to it. To write the file:
 
 1. Read the model's endpoint (`supported_parameters`: references, aspect ratios, n, seed, background) and its own prompting guide, and add what is general about it to the table and the section above.
 2. Start from `style.md` and the current model's prompting file; keep the style paragraph's meaning and rewrite its form for how this model reads (order, length, how references are named).
-3. Draw with the references attached and review side by side with the references and with the current model's results for the same request. Drift on a property `style.md` pins is fixed in the new file before the next image.
+3. Offer the comparison: the same few requests drawn once with each model, side by side on the canvas, reviewed against the references request by request. Drift on a property `style.md` pins is fixed in the new file, as a new revision, before the user switches.
 
 Style-similarity embeddings help rank but are not calibrated: CSD is the best style-only embedding and still needs comparing against the current model and a no-style baseline rather than a fixed threshold. CLIP, DINO, and DreamSim mix content with style.

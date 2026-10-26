@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Serve the studio (web/) over every style in the workspace.
+"""Serve the studio (web/) over every project in the workspace.
 
-The page lists the styles, opens one, and shows its sessions. The server writes only records, through
-session.py and style.py: the user's answers, new styles (empty or from a confirmed one) with their
-make session, new generate, ideation, and model sessions, images attached to or taken off the answer
-being written, and the user's own changes (a style's name, its references, the model it uses, deleting
-it, a session's name, deleting a session). It never generates. The agent waits for answers with
-`session.py watch`, does the work, and publishes the next round; the open page follows on its own.
+The server writes only records, through the engine's modules: projects, styles and the user's own changes to them
+(references, models, restoring a revision), nodes (a generation asked for, a tool run here, an upload), the canvas
+layout, threads and the user's answers. What is written in words (a brief, a style's rules and prompting, a text a
+generation asks for) the agent writes. The server never generates: the agent waits with `open-package watch`, does the
+work, and publishes; the open page follows on its own. A tool node runs here, since it draws nothing and costs nothing.
 """
 
 import argparse
@@ -15,36 +14,36 @@ import binascii
 import io
 import json
 import mimetypes
-import re
-import time
+import tempfile
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import workspace
-from capability import reference_limit
 from catalog import catalog
-from session import Session, create_style, open_session
-from style import IMAGE_SUFFIXES, Style, StyleError
+from node import Node, run_in_background, views
+from project import Project
+from style import Style
+from thread import open_project_thread, open_style_thread
+from workspace import RecordError
 
 ENGINE = Path(__file__).resolve().parent
 WEB = ENGINE.parent / "web"
+PAGES = ("/i18n.js", "/ui.css", "/ui.js", "/app.css", "/app.js", "/canvas.js", "/style.js", "/style.css")
 
 
 def main():
     arguments = parse_arguments()
     workspace.enter()
-    workspace.STYLES.mkdir(exist_ok=True)
-
-    handler = type("BoundHandler", (Handler,), {"styles": workspace.STYLES, "workspace": workspace.HOME})
-    server = Server((arguments.host, arguments.port), handler)
+    workspace.PROJECTS.mkdir(exist_ok=True)
+    server = Server((arguments.host, arguments.port), Handler)
     print(f"http://{arguments.host}:{arguments.port}", flush=True)
     server.serve_forever()
 
 
 class Server(ThreadingHTTPServer):
-    # A page asks for a whole grid of images at once; the default backlog of 5 resets the rest.
+    # A page asks for a whole canvas of images at once; the default backlog of 5 resets the rest.
     request_queue_size = 128
     daemon_threads = True
 
@@ -56,57 +55,69 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def summary(style):
-    """What the home screen shows for one style: while it is being made, where its make session is."""
-    making = Session.making(style)
-    current = making.latest() if making else None
-    shown = style.references() or (current.record["candidates"] if current else [])
+def agent():
+    seen = workspace.agent_seen()
+    return {"seen": None if seen is None else round(seen)}
+
+
+def project_summary(project):
+    nodes = project.nodes()
+    cover = next((image for node in reversed(nodes) for image in node.view()["images"]), None)
+    return {
+        "name": project.name,
+        "purpose": project.purpose(),
+        "styles": [style.name for style in project.styles()],
+        "nodes": len(nodes),
+        "cover": cover["path"] if cover else None,
+        "working": sum(1 for node in nodes if node.kind == "generation" and node.result() is None) + sum(1 for thread in project.threads() if not thread.waiting())
+    }
+
+
+def revision_entry(entry):
+    return {key: entry.get(key) for key in ("number", "time", "summary", "source", "reason", "origin")}
+
+
+def style_summary(style):
+    """What the canvas needs of a style: whether it can draw, and the revisions a generation can be drawn with."""
     return {
         "name": style.name,
         "purpose": style.purpose(),
-        "confirmed": style.confirmed(),
-        "based_on": style.based_on(),
-        "kind": current.kind if current else None,
-        "waiting": bool(current and current.feedback() is None),
-        # The agent has something to do in a session: an answer to act on, or a model session to prepare.
-        "working": any(not session.summary()["waiting"] for session in Session.all(style)),
-        "cover": shown[0] if shown else None,
-        "archived": len(style.archived())
-    }
-
-
-def overview(style):
-    """A style's words, references, and models, shown when no session is open."""
-    return {
-        "spec": style.spec(),
-        "references": style.references(),
         "model": style.model(),
-        "models": style.models(),
-        "prompting": style.prompting(),
-        "confirmed": style.confirmed(),
-        "based_on": style.based_on()
+        "blocked": style.blocked(),
+        "missing": style.missing(),
+        "revisions": [{"number": entry["number"], "summary": entry["summary"], "blocked": style.snapshot(entry["number"]).blocked()} for entry in style.revisions()]
     }
 
 
-def archive_of(style):
-    """The archive, newest last."""
-    return [{**item, "file": style.relative(style.path / item["file"])} for item in style.archived()]
+def style_detail(style):
+    """The style page: its files, and every revision with the images drawn with it, newest node first."""
+    drawn = {}
+    for node in reversed(style.project.nodes()):
+        if node.style == style.name:
+            drawn.setdefault(node.revision, []).extend({"node": node.id, "path": image["path"], "draft": node.draft} for image in node.view()["images"])
+    return {
+        **style_summary(style),
+        "spec": style.spec(),
+        "models": style.models(),
+        "references": style.references(),
+        "set_check": style.set_check(),
+        "revisions": [{**revision_entry(entry), "drawn": drawn.get(entry["number"], [])} for entry in style.revisions()],
+        "current": style.recorded()
+    }
 
 
-def check_references(style, count, model=None):
-    """A style's references are attached to every generation, so they never outnumber what any of its models takes,
-    nor what a model being added takes."""
-    models = [model] if model else style.models() + [session.record["model"] for session in Session.all(style) if session.kind == "model"]
-    for each in models:
-        limit = reference_limit(each)
-        if limit is not None and count > limit:
-            raise StyleError(f"{each} takes at most {limit} references; this would make {count}")
+def revision_detail(style, number):
+    """A revision as it was, with what changed in its words since the one before."""
+    snapshot = style.snapshot(number)
+    return {
+        "spec": snapshot.spec(),
+        "model": snapshot.config()["model"],
+        "references": snapshot.references(),
+        "changes": snapshot.changes_since(style.snapshot(number - 1) if number > 1 else None)
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
-    styles = None
-    workspace = None
-
     def trusted(self):
         """Only this studio's own page may talk to it: the Host must be the address the server listens on, and
         writes must be JSON, which a page on another site cannot send without a preflight the server never grants."""
@@ -124,25 +135,47 @@ class Handler(BaseHTTPRequestHandler):
             return
         url = urlparse(self.path)
         path = unquote(url.path)
-        query = parse_qs(url.query)
-
+        query = {key: values[0] for key, values in parse_qs(url.query).items()}
         try:
             if path == "/":
                 return self.send_file(WEB / "index.html")
-            if path in ("/i18n.js", "/ui.css", "/ui.js", "/app.css", "/app.js"):
+            if path in PAGES:
                 return self.send_file(WEB / path.lstrip("/"))
-            if path == "/api/styles":
-                return self.send_json(200, {"styles": [summary(style) for style in self.all_styles()]})
+            if path == "/api/projects":
+                return self.send_json(200, {"projects": [project_summary(project) for project in Project.all()], "agent": agent()})
+            if path == "/api/project":
+                project = self.project(query)
+                return self.send_json(200, {
+                    "name": project.name,
+                    "purpose": project.purpose(),
+                    "brief": project.brief(),
+                    "styles": [style_summary(style) for style in project.styles()],
+                    "nodes": views(project),
+                    "canvas": project.canvas(),
+                    "threads": [thread.summary() for thread in project.threads()],
+                    "agent": agent()
+                })
+            if path == "/api/style":
+                return self.send_json(200, {**style_detail(self.style(query)), "agent": agent()})
+            if path == "/api/revision":
+                return self.send_json(200, revision_detail(self.style(query), int(query.get("revision", "0"))))
+            if path == "/api/thread":
+                project = self.project(query)
+                return self.send_json(200, {**project.thread(query.get("thread", "")).view(), "agent": agent()})
             if path == "/api/archive":
-                return self.send_json(200, {"styles": [{"style": style.name, "items": archive_of(style)} for style in self.all_styles() if style.archived()]})
-            if path == "/api/state":
-                return self.send_state(self.style(query.get("style", [""])[0]), query.get("session", [None])[0])
+                return self.send_json(200, {"projects": [{"project": project.name, "nodes": [node for node in views(project) if node["images"]]} for project in Project.all()]})
             if path == "/api/catalog":
-                return self.send_json(200, {"models": catalog(self.all_styles())})
+                return self.send_json(200, {"models": catalog()})
             if path.startswith("/file/"):
                 return self.send_workspace_file(path[len("/file/"):])
+            if path.startswith("/object/"):
+                return self.send_object(path[len("/object/"):])
+        except RecordError as error:
+            return self.send_json(404, {"error": str(error)})
         except OSError as error:
             return self.send_json(502, {"error": f"could not read the model list: {error}"})
+        except ValueError as error:
+            return self.send_json(400, {"error": str(error)})
         self.not_found()
 
     def do_POST(self):
@@ -153,120 +186,124 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         except ValueError:
             return self.send_json(400, {"error": "the request body is not JSON"})
-
         try:
-            if path == "/api/styles":
-                style = create_style(self.styles, body.get("name", "").strip(), body.get("base") or None)
-                return self.send_json(200, {"style": style.name})
-            if path == "/api/download":
-                return self.download(body.get("files", []))
-
-            style = self.style(body.get("style", ""))
-            if style is None:
-                return self.send_json(404, {"error": "no such style"})
-            if path in ("/api/styles/rename", "/api/styles/delete") and any(not session.summary()["waiting"] for session in Session.all(style)):
-                raise StyleError("the agent is working in one of this style's sessions; try again when it is done")
-            if path == "/api/styles/rename":
-                return self.send_json(200, {"style": style.rename(body.get("name", "").strip()).name})
-            if path == "/api/styles/delete":
-                style.delete()
-                return self.send_json(200, {"ok": True})
-            if path == "/api/sessions":
-                session = open_session(style, body.get("kind"), body.get("model") or None)
-                return self.send_json(200, {"session": session.id})
-            if path == "/api/model":
-                check_references(style, len(style.references()), body.get("model", ""))
-                style.use(body.get("model", ""))
-                return self.send_json(200, {"ok": True})
-            if path == "/api/models/delete":
-                style.remove_model(body.get("model", ""))
-                return self.send_json(200, {"ok": True})
-            if path == "/api/references/add":
-                return self.add_reference(style, body)
-            if path == "/api/references/remove":
-                style.remove_reference(Path(body.get("file", "")).name)
-                return self.send_json(200, {"ok": True})
-
-            session = self.session(style, body.get("session"))
-            if path == "/api/sessions/rename":
-                session.rename(body.get("name", ""))
-                return self.send_json(200, {"ok": True})
-            if path == "/api/sessions/delete":
-                session.delete()
-                return self.send_json(200, {"ok": True})
-            if path == "/api/feedback":
-                return self.answer(session, body)
-            if path == "/api/attach":
-                return self.attach(session, body)
-            if path == "/api/detach":
-                return self.detach(session, body)
-        except (StyleError, ValueError, TypeError, AttributeError, KeyError) as error:
+            result = self.route(path, body)
+        except (RecordError, ValueError, TypeError, AttributeError, KeyError) as error:
             return self.send_json(400, {"error": str(error)})
         except OSError as error:
             return self.send_json(500, {"error": str(error)})
-        self.not_found()
+        if result is None:
+            return self.not_found()
+        if result is not True:
+            self.send_json(200, result)
 
-    def answer(self, session, body):
-        current = session.latest()
-        if current is None or current.number != body.get("round"):
-            return self.send_json(409, {"error": "this round is no longer the latest; reload the page"})
-        feedback = current.submit(
-            picked=[int(number) for number in body.get("picked", [])],
-            notes={int(number): text for number, text in body.get("notes", {}).items()},
-            comment=body.get("comment", ""),
-            request=body.get("request", ""),
-            decision=body.get("decision"),
-            surface="web"
-        )
-        self.send_json(200, feedback)
+    def route(self, path, body):
+        if path == "/api/download":
+            self.download(body.get("files", []))
+            return True
+        if path == "/api/projects":
+            return {"project": Project.create(body.get("name", "").strip()).name}
 
-    def attach(self, session, body):
-        name, content = self.upload(body)
-        folder = self.open_attachments(session)
-        folder.mkdir(exist_ok=True)
-        (folder / name).write_bytes(content)
-        self.send_json(200, {"path": session.style.relative(folder / name)})
+        project = self.project(body)
+        if path == "/api/projects/rename":
+            return {"project": project.rename(body.get("name", "").strip()).name}
+        if path == "/api/projects/delete":
+            project.delete()
+            return {"ok": True}
+        if path == "/api/canvas":
+            return project.save_canvas(body.get("positions"), body.get("frames"))
+        if path == "/api/styles":
+            source = self.style({"project": body["from_project"], "style": body["from_style"]}) if body.get("from_project") else None
+            style = Style.create(project, body.get("name", "").strip(), source)
+            thread = open_style_thread(style, first=source is None, surface="web")
+            return {"style": style.name, "thread": thread.id}
+        if path == "/api/nodes":
+            return self.add_node(project, body)
+        if path == "/api/nodes/delete":
+            self.node(project, body.get("node")).delete()
+            return {"ok": True}
+        if path == "/api/threads":
+            uploads = [self.upload(item) for item in body.get("attachments", [])]
+            if body.get("kind") == "project":
+                return {"thread": open_project_thread(project, message=body.get("message", ""), uploads=uploads, surface="web").id}
+            return {"thread": open_style_thread(project.style(body.get("style", "")), message=body.get("message", ""), uploads=uploads, surface="web").id}
+        if path.startswith("/api/threads/"):
+            return self.thread_change(path, project, body)
+        if path.startswith("/api/styles/"):
+            return self.style_change(path, project.style(body.get("style", "")), body)
+        return None
 
-    def detach(self, session, body):
-        path = session.style.resolve(body.get("path", ""))
-        if path.parent != self.open_attachments(session).resolve() or not path.is_file():
-            raise StyleError("no such attachment")
-        path.unlink()
-        self.send_json(200, {"ok": True})
+    def style_change(self, path, style, body):
+        if path == "/api/styles/rename":
+            return {"style": style.rename(body.get("name", "").strip()).name}
+        if path == "/api/styles/delete":
+            style.delete()
+            return {"ok": True}
+        if path == "/api/styles/use":
+            return {"revision": style.use(body.get("model", ""))}
+        if path == "/api/styles/restore":
+            return {"revision": style.restore(int(body.get("revision", 0)))}
+        if path == "/api/styles/references/add":
+            return {"path": self.add_reference(style, body)}
+        if path == "/api/styles/references/remove":
+            return {"revision": style.remove_reference(Path(body.get("file", "")).name)}
+        return None
+
+    def thread_change(self, path, project, body):
+        thread = project.thread(body.get("thread", ""))
+        if path == "/api/threads/rename":
+            thread.rename(body.get("name", ""))
+            return {"ok": True}
+        if path == "/api/threads/delete":
+            thread.delete()
+            return {"ok": True}
+        current = thread.latest()
+        if path == "/api/threads/answer":
+            if current is None or current.number != body.get("round"):
+                raise RecordError("this round is no longer the latest; reload the page")
+            return current.submit(
+                picked=[int(number) for number in body.get("picked", [])],
+                notes={int(number): text for number, text in body.get("notes", {}).items()},
+                comment=body.get("comment", ""),
+                nodes=body.get("nodes", []),
+                surface="web"
+            )
+        return None
+
+    def add_node(self, project, body):
+        kind = body.get("kind", "generation")
+        attachments = [self.upload(item, text=kind == "upload") for item in body.get("attachments", [])]
+        node = Node.create(project, kind, body.get("request", ""), body.get("style"), body.get("revision"), body.get("parents", []), attachments, body.get("tool"), thread=body.get("thread"), surface="web")
+        if kind == "tool":
+            run_in_background(node)
+        return {"node": node.id}
 
     def add_reference(self, style, body):
-        """A reference comes from an image in the workspace (the archive, a session) or from an upload."""
-        check_references(style, len(style.references()) + 1)
-        before = set(style.references())
+        """A reference comes from an image or a text in the project, or from an upload."""
         if body.get("path"):
-            source = style.resolve(body["path"])
-            if not self.inside_workspace_images(source):
-                raise StyleError("no such image")
-            path = style.add_reference(source)
-            return self.send_json(200, {"path": path, "added": path not in before})
-        name, content = self.upload(body)
-        folder = self.workspace / "sessions" / ".uploads"
-        folder.mkdir(parents=True, exist_ok=True)
-        upload = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{name}"
-        upload.write_bytes(content)
+            source = style.project.resolve(body["path"])
+            if not source.is_file():
+                raise RecordError("no such image or text")
+            return style.add_reference(source)
+        name, content = self.upload(body, text=True)
+        folder = workspace.HOME / ".uploads"
+        folder.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=folder, suffix=Path(name).suffix, delete=False) as file:
+            file.write(content)
+        upload = Path(file.name)
         try:
-            path = style.add_reference(upload)
-            return self.send_json(200, {"path": path, "added": path not in before})
+            return style.add_reference(upload)
         finally:
             upload.unlink(missing_ok=True)
 
-    def upload(self, body):
-        # The name keeps its letters in any script; only the extension decides whether it is an image.
-        original = Path(Path(body.get("name", "")).name)
-        if original.suffix.lower() not in IMAGE_SUFFIXES:
-            raise StyleError("attach a png, jpg, or webp image")
-        name = (re.sub(r"[^\w.-]", "-", original.stem).strip("-.") or "image") + original.suffix.lower()
+    def upload(self, body, text=False):
+        name = workspace.upload_name(body.get("name", ""), text)
         try:
             content = base64.b64decode(body.get("data", ""), validate=True)
         except binascii.Error:
-            raise StyleError("the image data is not base64")
+            raise RecordError("the file data is not base64")
         if not content:
-            raise StyleError("the image is empty")
+            raise RecordError("the file is empty")
         return name, content
 
     def download(self, files):
@@ -274,66 +311,41 @@ class Handler(BaseHTTPRequestHandler):
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as bundle:
             for item in files:
-                source = (self.workspace / item.get("path", "")).resolve()
-                if not self.inside_workspace_images(source):
-                    raise StyleError(f"no such image {item.get('path')}")
+                source = workspace.resolve(item.get("path", ""))
+                if not self.servable(source):
+                    raise RecordError(f"no such image {item.get('path')}")
                 bundle.write(source, Path(item.get("name") or source.name).name)
         self.send(200, archive.getvalue(), "application/zip")
 
-    def open_attachments(self, session):
-        """Attachments go with the answer being written, so only an open round takes them."""
-        current = session.latest()
-        if current is None or current.feedback() is not None:
-            raise StyleError("there is no answer being written to attach to")
-        return current.directory / "attachments"
+    def project(self, values):
+        name = values.get("project") or ""
+        project = Project(workspace.PROJECTS / name)
+        if not name or "/" in name or name.startswith(".") or not project.exists():
+            raise RecordError("no such project")
+        return project
 
-    def all_styles(self):
-        return Style.all(self.styles)
+    def style(self, values):
+        project = self.project(values)
+        name = values.get("style") or ""
+        if "/" in name or name.startswith("."):
+            raise RecordError("no such style")
+        return project.style(name)
 
-    def style(self, name):
-        path = (self.styles / name).resolve()
-        return Style(path) if name and path.parent == self.styles and path.is_dir() else None
-
-    def session(self, style, identifier):
+    def node(self, project, identifier):
         if not identifier or "/" in identifier or identifier.startswith("."):
-            raise StyleError("no such session")
-        directory = style.sessions / identifier
-        if not (directory / "session.json").exists():
-            raise StyleError("no such session")
-        return Session(style, directory)
+            raise RecordError("no such node")
+        return Node.at(workspace.relative(project.path / "nodes" / identifier))
 
-    def send_state(self, style, identifier):
-        if style is None:
-            return self.send_json(404, {"error": "no such style"})
-        sessions = Session.all(style)
-        # Without a session asked for, a style being made opens on its make session.
-        if identifier:
-            chosen = next((session for session in sessions if session.id == identifier), None)
-            if chosen is None:
-                return self.send_json(404, {"error": "no such session"})
-        else:
-            chosen = Session.making(style)
-        current = chosen.latest() if chosen else None
-        self.send_json(200, {
-            "style": style.name,
-            "sessions": [session.summary() for session in sessions],
-            "session": chosen.summary() if chosen else None,
-            "view": current.view() if current else None,
-            "overview": overview(style),
-            "archive": archive_of(style)
-        })
-
-    def inside_workspace_images(self, path):
-        allowed = (self.styles, self.workspace / "sessions")
-        return path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES and any(root.resolve() in path.parents for root in allowed)
+    def servable(self, path):
+        return path.is_file() and path.suffix.lower() in workspace.IMAGE_SUFFIXES and workspace.inside(path, workspace.PROJECTS)
 
     def send_workspace_file(self, relative):
-        """Only images inside styles/ and sessions/ are served."""
+        """Only images inside projects/ are served."""
         try:
-            path = (self.workspace / relative).resolve()
+            path = workspace.resolve(relative)
         except (ValueError, OSError):
             return self.not_found()
-        if not self.inside_workspace_images(path):
+        if not self.servable(path):
             return self.not_found()
         # Images are revalidated, not refetched: an unchanged file answers 304, so a re-rendered page keeps its layout.
         status = path.stat()
@@ -344,6 +356,16 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         self.send_file(path, tag)
+
+    def send_object(self, name):
+        """An image kept under its hash, such as a reference at an earlier revision."""
+        if len(name) != 40 or any(character not in "0123456789abcdef" for character in name) or not workspace.object_path(name).is_file():
+            return self.not_found()
+        content = workspace.read_object(name)
+        media = workspace.image_type(content)
+        if media is None:
+            return self.not_found()
+        self.send(200, content, media, f'"{name}"')
 
     def send_file(self, path, tag=None):
         if not path.is_file():
@@ -364,8 +386,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         if tag:
-            # Workspace images never change under their path (references are never renumbered, archive and
-            # session files are written once), so the browser keeps them and a redrawn page shows them at once.
+            # Images never change under their path (node, round, and reference files are written once and
+            # references are never renumbered) and objects never change at all, so the browser keeps them.
             self.send_header("ETag", tag)
             self.send_header("Cache-Control", "private, max-age=86400")
         else:

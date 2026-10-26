@@ -4,12 +4,12 @@ What a style is and how `style.md` is written. The workflow that produces it is 
 
 ## What a style is
 
-A style is two things: `style.md`, the style in words, and `references/`, the images the user chose as the style. While a style is being made, `style.md` is rewritten as often as the conversation needs. Once the user confirms it, `style.md` does not change again: a different look is a different style, made from this one (`session.py new --from`), and the original stays as it is. The references are the user's to curate: the confirm round chooses the first set, and afterwards the user adds images that are the style and takes out ones that teach the wrong thing.
+A style is two things: `style.md`, the style in words, which the agent writes, and `references/`, the material the user chose for it: images, each with its annotation, and texts that hold what the style keeps to (a palette, design tokens). Neither is ever final. Every image shows something to improve, so the style keeps changing, and every change is a revision (`workflow.md`, A style is a source); the user draws with whichever revision they choose. The agent rewrites `style.md` as often as the reactions need. The references are the user's to curate: they add images and texts from the canvas that are the style and take out ones that teach the wrong thing.
 
-Everything else is either session material or translation:
+Everything else is either material or translation:
 
-- Session material: the images the user attaches, candidate images, sample images, and the conversation. They are what the agent reads to write `style.md`, and they leave with the session. A made image becomes a style reference only when the user chooses it as one.
-- Translation: `prompting/<model>.md`, one per model the style can draw with, and `model`, the one in use. Models differ in how they read prompts and references, so each model gets its own way of writing this style, and the model can change without the style changing.
+- Material: what is made on the canvas (the images the user sends, drafts, drawn images, texts) and the conversation. They are what the agent reads to write `style.md`. A made image or text becomes a reference only when the user chooses it as one.
+- Translation: `prompting/<model>.md`, one per model the style can draw with, and the model in use (`style.json`). Models differ in how they read prompts and references, so each model gets its own way of writing this style, and the model can change without the style changing.
 
 A style is only a style. It is how images look: medium, shape, camera, line, light, color, materials, texture, detail, composition. It is not what they show. A style made for app icons, illustrations, or cute characters in general draws any subject, so nothing of the domain it was first wanted for goes into it: not into `style.md`, the candidates, the samples, or the references. A reference image is read for how it looks, never for what it shows; a sheet of weather icons says "soft inflated plastic, top-left light", not "clouds". Only a style the user scopes to a domain carries that domain, and the Use section of `style.md` says which kind a style is.
 
@@ -37,7 +37,7 @@ Sections, in this order:
 | Mood | the emotional register, the expression range, what situations may be shown, each backed by the values above |
 | Never | the few things the user ruled out or the model was seen to draw wrongly, each with why |
 | Checks | the tests every image must pass, written so `review.md` can apply them: light direction, color count, outline policy, smallest feature, framing, exclusions |
-| Decisions | what decided each part: the user's words, the pick and the reason given, the reference it was read from |
+| Decisions | what decided each part: the user's words, the pick and the reason given, the reference it was read from, the revision it came in with |
 
 Rules for the text:
 
@@ -50,3 +50,5 @@ Rules for the text:
 - Words a model takes as a format bring their conventions: "icon" adds a rounded tile, "sticker" a die-cut border. Rules of use (an app icon is one object on a plain background) go under Composition in plain terms.
 - Mood words alone move little. Each one is backed by values elsewhere ("playful" is rounded forms, saturated color, soft light).
 - `style.md` names no model. What a particular model needs goes into its prompting file.
+- `style.md` names no reference. What each image shows and lends is in its annotation, which travels with the image. A text reference's values are not copied in; `style.md` says how values like them are used ("one color per main part"), so a new palette changes the colors without changing the words.
+- A rule changed after the style first drew says the revision it came in with in its source tag ("(owner, revision 7)"), so the Decisions section and the tags stay the history of the words.

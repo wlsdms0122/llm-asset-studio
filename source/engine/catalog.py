@@ -17,14 +17,14 @@ import time
 import urllib.request
 
 import workspace
-from style import Style
+from workspace import read_lines
 
 API = "https://openrouter.ai/api/v1"
 CATALOG = workspace.CACHE / "catalog.json"
 CATALOG_TTL = 24 * 60 * 60
 
 
-def catalog(styles):
+def catalog():
     if CATALOG.exists() and time.time() - CATALOG.stat().st_mtime < CATALOG_TTL:
         models = json.loads(CATALOG.read_text())
     else:
@@ -46,10 +46,10 @@ def catalog(styles):
             CATALOG.parent.mkdir(parents=True, exist_ok=True)
             CATALOG.write_text(json.dumps(models, indent=2))
     measured = {}
-    for style in styles:
-        for entry in style.ledger().generations():
-            if entry.get("model") and entry.get("cost") is not None:
-                measured.setdefault(entry["model"], []).append(entry["cost"] / len(entry["outputs"]))
+    for record in workspace.PROJECTS.glob("**/calls.jsonl"):
+        for call in read_lines(record):
+            if call.get("status") == "ok" and call.get("outputs") and call.get("cost") is not None:
+                measured.setdefault(call["model"], []).append(call["cost"] / len(call["outputs"]))
     return [{**model, "measured": sum(measured[model["id"]]) / len(measured[model["id"]]) if model["id"] in measured else None} for model in models]
 
 
@@ -92,7 +92,7 @@ def main():
     arguments = parser.parse_args()
     workspace.enter()
 
-    models = catalog(Style.all(workspace.STYLES))
+    models = catalog()
     if arguments.free:
         unread = [model["id"] for model in models if model.get("unread")]
         models = [model for model in models if free(model)]

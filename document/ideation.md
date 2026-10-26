@@ -1,12 +1,12 @@
 # Ideation
 
-How the agent works out what an image should be when the user does not know yet. Ideation is a session of its own, a conversation of discover rounds; the commands and the records are in `workflow.md`.
+How the agent works out what an image should be when the user does not know yet. Ideation happens in a project thread, a conversation in rounds; what it makes (drafts of ideas, the image's brief) are nodes on the canvas. The commands and the records are in `workflow.md`.
 
 ## The role
 
 In ideation the agent is the designer and the user is the client. A client brings a need ("an icon for a weather app", "something for the top of this article") and recognizes the answer when they see it; they are not expected to know what to draw. The designer's job is to turn the need into an image: analyze it, propose ideas with reasons, recommend one, and develop the one the client picks until it is ready to draw. A turn that only asks questions hands the designer's work back to the client.
 
-The style is already decided, so the design work is all about content: what the image says, what is in it, and how it is arranged. The style's `style.md` (Subjects, Composition, Never) is a constraint the ideas work inside, never a question.
+The design work is about content: what the image says, what is in it, and how it is arranged. The style it will be drawn in is a constraint, not part of the design: its `style.md` (Subjects, Composition, Never) bounds the ideas. When the user has not said which style, the agent asks early, as a choice among the project's styles, since it decides what ideas can work.
 
 ## Analyzing the need
 
@@ -41,16 +41,16 @@ The first message restates the need as a design problem in one or two plain sent
 
 ## Images in ideation
 
-- Every ideation candidate comes from the draft model (`models.md`). A draft costs nothing or close to it, so the agent can show more and iterate faster: more ideas in the first round, more versions while developing, a fresh image instead of a long explanation.
+- Every idea is a draft: a generation node of the thread drawn with the draft model (`models.md`), with the style when it is known. A draft costs nothing or close to it, so the agent can show more and iterate faster: more ideas in the first round, more versions while developing, a fresh image instead of a long explanation.
 - The draft model does not draw the style. Each message says what to look at (the idea, the subject, the layout) and what to ignore (the rendering), and each prompt describes the idea in the style's subject terms so the only difference from the final image is the rendering.
-- These are roughs, so they are not archived.
-- When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's `generate` is the go-ahead: the image is drawn with the style's model and references and shown in the conversation, and it is archived. The user's reaction to it goes on in the same conversation; a fix about the idea updates the brief, a fix about this image goes into the next prompt.
+- Drafts sit on the canvas marked as drafts, in a row per round, and the round points to them; the user picks and notes them in the thread.
+- When the image is concrete (one idea picked, its composition settled, the open points answered or marked open), the agent says so and proposes drawing it with the style's own model, with the cost of one image. The user's go-ahead is picking the brief and asking in the composer, or saying so in the thread; then the agent adds a generation node with the brief as its parent (`node.py add <project> --style <style> --request "<the image's name>" --parent projects/<project>/nodes/<id>/text.md --thread <t>`), drawn with the style's model and references like any other, and the next round points to it. The user's reaction goes on in the thread or on the canvas; a fix about the idea is a new brief, a fix about the drawn image is a refine of it.
 
 ## The brief
 
-`brief.md` in the session folder is the written result of ideation, the way `style.md` is the result of discovering a style. The agent writes it once the image has a shape and keeps it current every turn. It is in English, in the terms the style's prompting file uses, so a prompt can be written from it without the conversation:
+The brief of the image is the written result of ideation, the way `style.md` is the result of discovering a style. It is a text node of the thread (`node.py add <project> --request "<the brief of the image>" --thread <t>`, published with `--text`). The agent writes it once the image has a shape, and when it changes writes a new one whose parent is the last, so every version stays on the canvas. It is in English, in the terms the style's prompting file uses, so a prompt can be written from it without the conversation:
 
-- a first line that names the image (the session is listed by it)
+- a first line that names the image (the text's card shows it first)
 - Use: where it is seen, at what size, and what it sits with
 - Idea: what the image says, in one sentence
 - Subject and elements: what is in it, how many, and what each looks like
@@ -58,4 +58,4 @@ The first message restates the need as a design problem in one or two plain sent
 - Text: none, or exactly what and where
 - Open: what is still undecided
 
-Rendering does not go in the brief; that is `style.md`. A reaction about rendering is sorted as in generating: if `style.md` already asks for it, the prompting file is fixed; if it asks for another look, that is a new style.
+Rendering does not go in the brief; that is `style.md`. A reaction about rendering is sorted as in improving a style (`workflow.md`): a change to the prompting file, to `style.md`, or to the references, proposed to the user.

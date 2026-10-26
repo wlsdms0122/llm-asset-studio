@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Draw the latest round of a session as one numbered contact sheet, for reviewing it in conversation.
+"""Draw images as one numbered contact sheet, for showing them in conversation.
 
-Numbers and order match the web page, so an answer like "2 is closest" can go straight into
-`session.py answer`. Needs Pillow.
+  a thread      the images of the nodes its latest round shows, numbered as `thread answer --picked` reads them
+  a node        its images, in display order
+
+Needs Pillow.
 """
 
 import argparse
@@ -11,8 +13,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 import workspace
-from session import Session
-from style import StyleError
+from node import Node
+from project import Project
+from thread import Thread
+from workspace import RecordError
 
 CHECKER = 16
 LABEL = 40
@@ -22,35 +26,45 @@ def main():
     arguments = parse_arguments()
     workspace.enter()
     try:
-        session = Session.at(arguments.session)
-    except StyleError as error:
+        project, paths, labels, default = shown(arguments.target)
+    except RecordError as error:
         raise SystemExit(str(error))
-    style = session.style
-    current = session.latest()
-    if current is None:
-        raise SystemExit("no round to draw")
-
-    candidates = current.candidates()
-    if not candidates:
-        raise SystemExit(f"round {current.number} has no images")
-    columns = min(arguments.columns, len(candidates))
-    rows = -(-len(candidates) // columns)
+    if not paths:
+        raise SystemExit("no images to draw")
+    columns = min(arguments.columns, len(paths))
+    rows = -(-len(paths) // columns)
     size = arguments.size
     sheet = Image.new("RGB", (columns * size, rows * (size + LABEL)), "white")
     font = label_font(LABEL - 12)
     draw = ImageDraw.Draw(sheet)
 
-    for index, path in enumerate(candidates):
+    for index, (path, text) in enumerate(zip(paths, labels)):
         left, top = (index % columns) * size, (index // columns) * (size + LABEL)
-        label = f"{index + 1}  {current.record.get('descriptions', {}).get(path, '')}".rstrip()
+        label = text.rstrip()
         while len(label) > 2 and draw.textlength(label, font=font) > size - 16:
             label = label[:-2] + "…"
         draw.text((left + 8, top + 6), label, fill="black", font=font)
-        sheet.paste(tile(style.resolve(path), size), (left, top + LABEL))
+        sheet.paste(tile(project.resolve(path), size), (left, top + LABEL))
 
-    output = Path(arguments.out or current.directory / "sheet.png")
+    output = Path(arguments.out or default / "sheet.png")
     sheet.save(output)
     print(output)
+
+
+def shown(path):
+    """The project, the images in order labeled with their numbers, and where the sheet goes by default."""
+    parts = workspace.relative(workspace.resolve(path)).split("/")
+    if len(parts) == 4 and parts[2] == "threads":
+        thread = Thread.at(path)
+        current = thread.latest()
+        if current is None:
+            raise RecordError("no round to draw")
+        shown = [item for item in current.candidates(current.shown({node.id: node for node in thread.project.nodes()})) if item["image"]]
+        return thread.project, [item["path"] for item in shown], [f"{item['number']}  {item['image']['description'] or ''}" for item in shown], current.directory
+    if len(parts) == 4 and parts[2] == "nodes":
+        view = Node.at(path).view()
+        return Project.at(path), [image["path"] for image in view["images"]], [f"{number}  {image['description'] or ''}" for number, image in enumerate(view["images"], 1)], workspace.resolve(path)
+    raise RecordError(f"{path} is not a thread or a node")
 
 
 def label_font(size):
@@ -63,8 +77,8 @@ def label_font(size):
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("session", help="the session folder, such as sessions/app-icon/20261011-230012")
-    parser.add_argument("--out", help="PNG to write; defaults to sheet.png in the round directory")
+    parser.add_argument("target", help="a thread or a node folder")
+    parser.add_argument("--out", help="PNG to write; defaults to sheet.png in the round or node folder")
     parser.add_argument("--columns", type=int, default=3)
     parser.add_argument("--size", type=int, default=512, help="tile width in pixels")
     return parser.parse_args()
