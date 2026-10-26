@@ -153,7 +153,7 @@ function renderPanel() {
       title: style.name,
       detail: style.missing ? blockedReason(style) : style.purpose || null,
       onClick: () => { location.hash = hashes.style(project, style.name); },
-      aside: style.revisions.length ? h("span", { class: "muted", text: `r${style.revisions.length}` }) : null
+      aside: style.revisions.length ? revisionTag(style.revisions.length) : null
     }))) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
     h("div", { class: "row" }, [button(t("New style"), { small: true, iconName: "plus", onClick: newStyle })]),
 
@@ -243,7 +243,7 @@ function nodeHead(node, extra = []) {
   return [
     h("span", { class: "node-id", text: node.id }),
     h("span", { class: "node-kind", text: node.tool ? TOOL_NAMES[node.tool] : KIND_NAMES[node.kind] }),
-    node.style ? h("a", { class: "node-style", href: hashes.style(board.project, node.style, node.revision), text: `${node.style} · r${node.revision}`, title: t("{style} at revision {revision}", { style: node.style, revision: node.revision }) }) : null,
+    node.style ? h("a", { class: "node-style", href: hashes.style(board.project, node.style, node.revision), title: t("{style} at revision {revision}", { style: node.style, revision: node.revision }) }, [h("span", { text: node.style }), node.revision ? revisionTag(node.revision) : null]) : null,
     node.draft ? pill(t("Draft"), { small: true, title: t("Drawn with the draft model to settle a question in conversation, not in the style") }) : null,
     node.thread ? h("a", { class: "node-style", href: hashes.thread(board.project, node.thread), text: node.thread, title: t("Made in a thread") }) : null,
     h("span", { class: "grow" }),
@@ -1000,8 +1000,8 @@ function renderComposerStyles() {
   fill(board.revisionSlot, style && style.revisions.filter(revision => !revision.blocked).length > 1 ? dropdown({
     value: board.draft.revision, title: t("Revision to draw with"),
     options: [
-      { value: null, label: t("Latest (r{revision})", { revision: latest }) },
-      ...[...style.revisions].reverse().slice(1).filter(revision => !revision.blocked).map(revision => ({ value: revision.number, label: `r${revision.number}`, detail: revision.summary }))
+      { value: null, label: t("Latest · revision {revision}", { revision: latest }) },
+      ...[...style.revisions].reverse().slice(1).filter(revision => !revision.blocked).map(revision => ({ value: revision.number, label: t("Revision {revision}", { revision: revision.number }), detail: revision.summary }))
     ],
     onChange: value => { board.draft.revision = value; renderComposerStyles(); }
   }) : null);
