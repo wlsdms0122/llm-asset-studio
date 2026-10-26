@@ -34,6 +34,7 @@ AGENT = HOME / "agent.json"
 KEY = HOME / "key"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+TEXT_SUFFIXES = {".md", ".txt"}
 
 
 class RecordError(Exception):
@@ -77,12 +78,13 @@ def require_name(name, what):
     return stored
 
 
-def upload_name(name):
-    """A file name the user sent, kept in any script; only the extension decides whether it is an image."""
+def upload_name(name, text=False):
+    """A file name the user sent, kept in any script; only the extension decides what it is: an image, or with text a
+    text file as well."""
     original = Path(Path(name or "").name)
-    if original.suffix.lower() not in IMAGE_SUFFIXES:
-        raise RecordError("attach a png, jpg, or webp image")
-    return (re.sub(r"[^\w.-]", "-", original.stem).strip("-.") or "image") + original.suffix.lower()
+    if original.suffix.lower() not in IMAGE_SUFFIXES | (TEXT_SUFFIXES if text else set()):
+        raise RecordError("send a png, jpg, or webp image, or a md or txt text" if text else "attach a png, jpg, or webp image")
+    return (re.sub(r"[^\w.-]", "-", original.stem).strip("-.") or "file") + original.suffix.lower()
 
 
 # Objects: file contents stored once under their hash, never changed or removed.

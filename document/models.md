@@ -67,10 +67,10 @@ A draft built from the user's images needs a model that takes references. A paid
 
 ## Adding a model to a style
 
-Adding a model is a proposal (`workflow.md`, Prompting per model): the agent writes the model's prompting file, proposes adding it and making it the model in use, and the probe run on the proposal compares the two models. To write the file:
+Adding a model (`workflow.md`, Prompting per model): the agent writes the model's prompting file and records the revision, and the user switches to it. To write the file:
 
 1. Read the model's endpoint (`supported_parameters`: references, aspect ratios, n, seed, background) and its own prompting guide, and add what is general about it to the table and the section above.
-2. Start from the effective `style.md` and the current model's prompting file; keep the style paragraph's meaning and rewrite its form for how this model reads (order, length, how references are named).
-3. Review the proposal's probe images side by side with the references and with the current revision's run, request by request. Drift on a property `style.md` pins is fixed in the new file, as a new proposal, before the user accepts.
+2. Start from `style.md` and the current model's prompting file; keep the style paragraph's meaning and rewrite its form for how this model reads (order, length, how references are named).
+3. Offer the comparison: the same few requests drawn once with each model, side by side on the canvas, reviewed against the references request by request. Drift on a property `style.md` pins is fixed in the new file, as a new revision, before the user switches.
 
 Style-similarity embeddings help rank but are not calibrated: CSD is the best style-only embedding and still needs comparing against the current model and a no-style baseline rather than a fixed threshold. CLIP, DINO, and DreamSim mix content with style.

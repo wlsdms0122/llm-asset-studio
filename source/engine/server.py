@@ -2,10 +2,10 @@
 """Serve the studio (web/) over every project in the workspace.
 
 The server writes only records, through the engine's modules: projects, styles and the user's own changes to them
-(references, models, extends, restoring a revision, accepting or rejecting a proposal), probe runs asked for, nodes
-(a generation asked for, a tool run here, an upload), the canvas layout, threads and the user's answers. What is
-written in words (a brief, a style's rules, its probes and prompting) the agent writes, from a thread. The server never
-generates: the agent waits with `open-package watch`, does the work, and publishes; the open page follows on its own. A tool node runs here, since it draws nothing and costs nothing.
+(references, models, restoring a revision), nodes (a generation asked for, a tool run here, an upload), the canvas
+layout, threads and the user's answers. What is written in words (a brief, a style's rules and prompting, a text a
+generation asks for) the agent writes. The server never generates: the agent waits with `open-package watch`, does the
+work, and publishes; the open page follows on its own. A tool node runs here, since it draws nothing and costs nothing.
 """
 
 import argparse
@@ -23,9 +23,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import workspace
 from catalog import catalog
 from node import Node, run_in_background, views
-from probe import ProbeRun
 from project import Project
-from proposal import Proposal
 from style import Style
 from thread import Thread, open_ideation, open_project_thread, open_style_thread
 from workspace import RecordError
@@ -75,38 +73,47 @@ def project_summary(project):
     }
 
 
+def revision_entry(entry):
+    return {key: entry.get(key) for key in ("number", "time", "summary", "source", "reason", "origin")}
+
+
 def style_summary(style):
-    snapshot = style.snapshot()
-    references = snapshot.references()
+    """What the canvas needs of a style: whether it can draw, and the revisions a generation can be drawn with."""
     return {
         "name": style.name,
         "purpose": style.purpose(),
-        "guide": style.guide(),
-        "extends": style.extends(),
         "model": style.model(),
         "blocked": style.blocked(),
         "missing": style.missing(),
-        "cover": next((item["path"] or f"objects/{item['object']}" for item in references if item["role"] == "style"), None),
-        "revision": len(style.revisions()),
-        "proposals": sum(1 for proposal in Proposal.all(style) if proposal.record["status"] == "open")
+        "revisions": [{"number": entry["number"], "summary": entry["summary"], "blocked": style.snapshot(entry["number"]).blocked()} for entry in style.revisions()]
     }
 
 
 def style_detail(style):
+    """The style page: its files, and every revision with the images drawn with it, newest node first."""
+    drawn = {}
+    for node in reversed(style.project.nodes()):
+        if node.style == style.name:
+            drawn.setdefault(node.revision, []).extend({"node": node.id, "path": image["path"]} for image in node.view()["images"])
     return {
         **style_summary(style),
         "spec": style.spec(),
-        "effective": style.snapshot().spec() if style.extends() else None,
-        "probes": style.probes(),
         "models": style.models(),
         "references": style.references(),
-        "drawn_with": style.snapshot().references(),
         "set_check": style.set_check(),
-        "revisions": [{key: entry[key] for key in ("number", "time", "summary", "source", "parents")} for entry in style.revisions()],
-        "current": style.recorded(),
-        "stale_bases": style.stale_bases(),
-        "proposals": [proposal.view() for proposal in Proposal.all(style)],
-        "runs": [run.view() for run in ProbeRun.all(style)]
+        "revisions": [{**revision_entry(entry), "drawn": drawn.get(entry["number"], [])} for entry in style.revisions()],
+        "current": style.recorded()
+    }
+
+
+def revision_detail(style, number):
+    """A revision as it was, with what changed in its words since the one before."""
+    snapshot = style.snapshot(number)
+    return {
+        "spec": snapshot.spec(),
+        "model": snapshot.config()["model"],
+        "references": snapshot.references(),
+        "changes": snapshot.changes_since(style.snapshot(number - 1) if number > 1 else None)
     }
 
 
@@ -151,9 +158,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/style":
                 return self.send_json(200, {**style_detail(self.style(query)), "agent": agent()})
             if path == "/api/revision":
-                style = self.style(query)
-                snapshot = style.snapshot(int(query.get("revision", "0")))
-                return self.send_json(200, {"spec": snapshot.spec(), "files": snapshot.files(), "references": snapshot.references()})
+                return self.send_json(200, revision_detail(self.style(query), int(query.get("revision", "0"))))
             if path == "/api/thread":
                 project = self.project(query)
                 return self.send_json(200, {**self.thread(project, query.get("thread")).view(), "agent": agent()})
@@ -209,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
             return project.save_canvas(body.get("positions"), body.get("frames"))
         if path == "/api/styles":
             source = self.style({"project": body["from_project"], "style": body["from_style"]}) if body.get("from_project") else None
-            style = Style.create(project, body.get("name", "").strip(), bool(body.get("guide")), source)
+            style = Style.create(project, body.get("name", "").strip(), source)
             thread = open_style_thread(style, first=source is None, surface="web")
             return {"style": style.name, "thread": thread.id}
         if path == "/api/nodes":
@@ -225,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"thread": opener(project.style(body.get("style", "")), message=body.get("message", ""), attachments=attachments, surface="web").id}
         if path.startswith("/api/threads/"):
             return self.thread_change(path, project, body)
-        if path.startswith("/api/styles/") or path.startswith("/api/proposals/") or path == "/api/runs":
+        if path.startswith("/api/styles/"):
             return self.style_change(path, project.style(body.get("style", "")), body)
         return None
 
@@ -237,22 +242,12 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": True}
         if path == "/api/styles/use":
             return {"revision": style.use(body.get("model", ""))}
-        if path == "/api/styles/extends":
-            return {"revision": style.set_extends(body.get("extends", []))}
         if path == "/api/styles/restore":
             return {"revision": style.restore(int(body.get("revision", 0)))}
         if path == "/api/styles/references/add":
-            return {"path": self.add_image(body, style.add_reference, style.project)}
+            return {"path": self.add_reference(style, body)}
         if path == "/api/styles/references/remove":
             return {"revision": style.remove_reference(Path(body.get("file", "")).name)}
-        if path == "/api/proposals/accept":
-            return {"revision": Proposal(style, body.get("proposal", "")).accept()}
-        if path == "/api/proposals/reject":
-            Proposal(style, body.get("proposal", "")).reject()
-            return {"ok": True}
-        if path == "/api/runs":
-            run = ProbeRun.request(style, body.get("proposal") or None, surface="web")
-            return {"run": run.number}
         return None
 
     def thread_change(self, path, project, body):
@@ -284,38 +279,38 @@ class Handler(BaseHTTPRequestHandler):
 
     def add_node(self, project, body):
         kind = body.get("kind", "generation")
-        attachments = [self.upload(item) for item in body.get("attachments", [])]
-        node = Node.create(project, kind, body.get("request", ""), body.get("style"), body.get("parents", []), attachments, body.get("tool"), surface="web")
+        attachments = [self.upload(item, text=kind == "upload") for item in body.get("attachments", [])]
+        node = Node.create(project, kind, body.get("request", ""), body.get("style"), body.get("revision"), body.get("parents", []), attachments, body.get("tool"), surface="web")
         if kind == "tool":
             run_in_background(node)
         return {"node": node.id}
 
-    def add_image(self, body, add, project=None):
-        """A reference comes from an image in the project or from an upload."""
+    def add_reference(self, style, body):
+        """A reference comes from an image or a text in the project, or from an upload."""
         if body.get("path"):
-            source = (project or self.project(body)).resolve(body["path"])
-            if not source.is_file() or source.suffix.lower() not in workspace.IMAGE_SUFFIXES:
-                raise RecordError("no such image")
-            return add(source)
-        name, content = self.upload(body)
+            source = style.project.resolve(body["path"])
+            if not source.is_file():
+                raise RecordError("no such image or text")
+            return style.add_reference(source)
+        name, content = self.upload(body, text=True)
         folder = workspace.HOME / ".uploads"
         folder.mkdir(exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=folder, suffix=Path(name).suffix, delete=False) as file:
             file.write(content)
         upload = Path(file.name)
         try:
-            return add(upload)
+            return style.add_reference(upload)
         finally:
             upload.unlink(missing_ok=True)
 
-    def upload(self, body):
-        name = workspace.upload_name(body.get("name", ""))
+    def upload(self, body, text=False):
+        name = workspace.upload_name(body.get("name", ""), text)
         try:
             content = base64.b64decode(body.get("data", ""), validate=True)
         except binascii.Error:
-            raise RecordError("the image data is not base64")
+            raise RecordError("the file data is not base64")
         if not content:
-            raise RecordError("the image is empty")
+            raise RecordError("the file is empty")
         return name, content
 
     def download(self, files):

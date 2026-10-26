@@ -3,9 +3,9 @@
 
 The agent's work, read from the records:
   projects/<p>/threads/<id>             a thread whose last round the user answered
-  projects/<p>/nodes/<id>               a generation node with no result yet
-  projects/<p>/styles/<s>/runs/<n>      a probe run with no result yet
-  projects/<p>/styles/<s>               a style reference with no annotation, or a reference set changed since its check
+  projects/<p>/nodes/<id>               a generation node with no result yet, to draw or to write
+  projects/<p>/styles/<s>               an image reference with no annotation, or a set of image references changed
+                                        since its check
 
 It looks at the records rather than at changes, so work that comes in while the agent is busy is printed by the
 next run, and work already waiting is printed at once. Every look is recorded in agent.json, so the page can show
@@ -19,9 +19,7 @@ import argparse
 import time
 
 import workspace
-from probe import ProbeRun
 from project import Project
-from workspace import digest
 
 
 def pending():
@@ -34,21 +32,20 @@ def pending():
             if node.kind == "generation" and node.result() is None:
                 found.append(node.directory)
         for style in project.styles():
-            found.extend(run.directory for run in ProbeRun.all(style) if run.result() is None)
             if unchecked(style):
                 found.append(style.path)
     return [workspace.relative(path) for path in found]
 
 
 def unchecked(style):
-    """A reference without its annotation, or a set of style references that is not the one last checked."""
-    references = style.references()
-    if any(item["annotation"] is None for item in references):
+    """An image reference without its annotation, or a set of image references that is not the one last checked."""
+    images = [item for item in style.references() if item["kind"] == "image"]
+    if any(item["annotation"] is None for item in images):
         return True
-    if not references:
+    if not images:
         return False
     check = style.set_check() or {}
-    return check.get("references") != {item["path"]: digest(style.project.resolve(item["path"])) for item in references}
+    return check.get("references") != {item["path"]: item["object"] for item in images}
 
 
 def main():

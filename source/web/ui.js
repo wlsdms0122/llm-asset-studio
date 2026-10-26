@@ -95,9 +95,13 @@ function menuButton(iconName, title, { value, options, onChange }) {
   return node;
 }
 
-// A button that opens the file picker for images.
-function uploadButton(title, onFiles, { iconName = "clip", label = null, variant = "" } = {}) {
-  const input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: true });
+const IMAGE_FILES = "image/png,image/jpeg,image/webp";
+// What can go on the canvas or into a style's references: images, and texts.
+const MATERIAL_FILES = `${IMAGE_FILES},.md,.txt,text/markdown,text/plain`;
+
+// A button that opens the file picker, for images unless accept says otherwise.
+function uploadButton(title, onFiles, { iconName = "clip", label = null, variant = "", accept = IMAGE_FILES } = {}) {
+  const input = h("input", { type: "file", accept, multiple: true });
   input.addEventListener("change", async () => { await onFiles([...input.files]); input.value = ""; });
   return h("label", { class: ["button", variant, label ? "" : "icon-only"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) + (label ? `<span>${label}</span>` : "") }, [input]);
 }
@@ -197,10 +201,6 @@ function pill(text, { tone = "", dot = null, small = false } = {}) {
   return h("span", { class: ["pill", tone, small && "small"].filter(Boolean).join(" ") }, [dot ? h("span", { class: `dot${dot === "live" ? " live" : ""}` }) : null, text]);
 }
 
-function chip(text, { on = false, onClick } = {}) {
-  return h("button", { class: `chip${on ? " on" : ""}`, type: "button", text, onclick: onClick });
-}
-
 function field(label, value, { strong = false, mono = false, grows = false } = {}) {
   const content = value instanceof Node ? value : mono ? h("pre", { class: "document", text: value }) : h("p", { class: `field-value${strong ? " strong" : ""}`, text: value });
   return h("div", { class: `field${grows ? " grows" : ""}` }, [h("span", { class: "field-label", text: label }), content]);
@@ -218,7 +218,7 @@ function workingNote(text) {
   return h("div", { class: "working-note" }, [h("span", { class: "spinner" }), text]);
 }
 
-// A message that stays on the page while something holds, such as a style whose probes are behind it.
+// A message that stays on the page while something holds, such as a style that cannot draw yet.
 // tone: "" (information) or warning (something is behind or fights). text: a line or a node; items: lines under it.
 function notice(text, { tone = "", items = null, action = null } = {}) {
   return h("div", { class: ["notice", tone].filter(Boolean).join(" ") }, [
@@ -312,38 +312,6 @@ function diffView(text) {
   }));
 }
 
-// ---------- choosing in order ----------
-
-// Several of a list in an order that matters: the chosen ones on top, numbered and moved with arrows, the rest under
-// them to add. items: [{ value, title, detail? }]; chosen: values in order. node.value() gives the order.
-function orderPicker({ items, chosen = [] }) {
-  let order = chosen.filter(value => items.some(item => item.value === value));
-  const node = h("div", { class: "order" });
-  const byValue = new Map(items.map(item => [item.value, item]));
-  const move = (index, by) => { const [value] = order.splice(index, 1); order.splice(index + by, 0, value); render(); };
-  const text = item => h("span", { class: "order-text" }, [h("strong", { text: item.title }), item.detail ? h("small", { text: item.detail }) : null]);
-  const render = () => {
-    const rest = items.filter(item => !order.includes(item.value));
-    fill(node,
-      order.length ? h("ol", { class: "order-list" }, order.map((value, index) => {
-        const up = tool("up", t("Move up"), () => move(index, -1), { quiet: true });
-        const down = tool("down", t("Move down"), () => move(index, 1), { quiet: true });
-        up.disabled = index === 0;
-        down.disabled = index === order.length - 1;
-        return h("li", { class: "order-item chosen" }, [
-          h("span", { class: "order-number", text: String(index + 1) }),
-          text(byValue.get(value)), up, down,
-          tool("close", t("Remove"), () => { order = order.filter(each => each !== value); render(); }, { quiet: true, danger: true })
-        ]);
-      })) : h("p", { class: "order-empty", text: t("Nothing chosen") }),
-      rest.map(item => h("button", { class: "order-item", type: "button", onclick: () => { order.push(item.value); render(); } }, [h("span", { class: "order-add", html: icon("plus") }), text(item)]))
-    );
-  };
-  node.value = () => [...order];
-  render();
-  return node;
-}
-
 // ---------- images ----------
 
 // fit: "natural" shows the image at its own ratio; "fill" crops it to a square cell so grids line up.
@@ -423,7 +391,7 @@ let modalRead = null;
 
 // input: "text" (one line), "long" (a paragraph), or null for a plain confirmation.
 // choices: [{ value, title, detail?, aside?, specs? }] shows a list to pick one from; specs are [label, value] pairs. Resolves to the answer, or null when cancelled.
-// content: a node of the page's own in place of choices, such as an orderPicker; result() gives the answer.
+// content: a node of the page's own in place of choices; result() gives the answer.
 // text: a long text to read, such as a prompt, shown wide with only the confirm button.
 function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null, content = null, result = null }) {
   if (text != null) input = null;

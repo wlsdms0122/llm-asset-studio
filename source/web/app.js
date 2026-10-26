@@ -48,6 +48,9 @@ function readFile(file) {
   return new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(",")[1]); reader.readAsDataURL(file); });
 }
 
+// Text written on the page, as the base64 the server takes for a file.
+const textData = text => btoa(Array.from(new TextEncoder().encode(text), byte => String.fromCharCode(byte)).join(""));
+
 // What a page compares between polls: its data without the agent's age, which changes on every call.
 const signatureOf = (value, ...more) => JSON.stringify([{ ...value, agent: undefined }, agentAttached(), ...more]);
 
@@ -82,7 +85,7 @@ const hashes = {
   archive: () => "#/archive",
   project: (project, node = null) => `#/p/${encode(project)}${node ? `?node=${encode(node)}` : ""}`,
   brief: project => `#/p/${encode(project)}/brief`,
-  style: (project, style, proposal = null) => `#/p/${encode(project)}/s/${encode(style)}${proposal ? `?proposal=${encode(proposal)}` : ""}`,
+  style: (project, style, revision = null) => `#/p/${encode(project)}/s/${encode(style)}${revision ? `?tab=history&revision=${revision}` : ""}`,
   thread: (project, thread) => `#/p/${encode(project)}/t/${encode(thread)}`
 };
 
@@ -232,21 +235,20 @@ try { const saved = Number(localStorage.getItem("panel-width")); if (saved) docu
 // Why a style cannot draw, from what the engine says it lacks.
 function blockedReason(style) {
   return {
-    guide: t("A guide lends its sections and draws nothing."),
     model: t("No model yet."),
-    prompting: t("No prompt guide for its model yet."),
-    references: t("No style references yet.")
+    prompting: t("No prompt guide for its model yet.")
   }[style.missing] || "";
 }
 
-// Adding an image to a style's references is one action wherever the image is shown; references are managed on the style page.
+// Adding an image or a text to a style's references is one action wherever it is shown; references are managed on the
+// style page.
 async function addToReferences(project, path, styles = null) {
   try {
     if (!styles) styles = (await api(`/api/project?project=${encode(project)}`)).styles;
     if (!styles.length) return toast(t("This project has no styles yet."), "error");
     const style = styles.length === 1 ? styles[0].name : await ask({
-      title: t("Add to references"), description: t("Choose the style that takes this image."), confirm: t("Add"), input: null,
-      choices: styles.map(each => ({ value: each.name, title: each.name, detail: each.guide ? t("Guide") : each.purpose }))
+      title: t("Add to references"), description: t("Choose the style that takes it."), confirm: t("Add"), input: null,
+      choices: styles.map(each => ({ value: each.name, title: each.name, detail: each.purpose }))
     });
     if (!style) return;
     await api("/api/styles/references/add", { project, style, path });
@@ -370,7 +372,7 @@ function nodeImageItem(project, node, image, styles = null) {
     ]
   };
 }
-const ROLE_NAMES = { style: t("Style"), subject: t("Subject"), composition: t("Composition"), guide: t("Guide"), attachment: t("Attachment") };
+const ROLE_NAMES = { style: t("Style"), subject: t("Subject"), composition: t("Composition"), attachment: t("Attachment") };
 
 // ---------- home ----------
 
@@ -627,10 +629,7 @@ function renderConversation(at, data) {
   const open = openRound();
   for (const round of data.rounds) {
     const items = candidateItems(at, round.candidates);
-    const links = [
-      ...round.proposals.map(id => linkButton(t("Proposal {id}", { id }), hashes.style(at.project, data.style, id), { iconName: "open" })),
-      ...round.nodes.map(id => linkButton(t("{node} on the canvas", { node: id }), hashes.project(at.project, id), { iconName: "open" }))
-    ];
+    const links = round.nodes.map(id => linkButton(t("{node} on the canvas", { node: id }), hashes.project(at.project, id), { iconName: "open" }));
     const agentSays = [
       round.note ? h("div", { class: "bubble", text: round.note }) : null,
       round !== open && round.candidates.length ? h("div", { class: "thumbs" }, round.candidates.map((candidate, index) => thumb(inProject(at.project, candidate.path), { picked: candidate.picked, badge: pad(candidate.number), title: candidate.description || t("Enlarge"), onClick: () => openLightbox(items, index) }))) : null,

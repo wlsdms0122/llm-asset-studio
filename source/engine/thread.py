@@ -8,7 +8,7 @@ file, so an answer given on the web page and one given in conversation leave the
     thread.json         kind, the style (none for a project thread), when it started, the name the user gave it
     brief.md            an ideation thread's brief: the image the agent and the user settled on
     NNN/round.json      written once by the agent: its message, the candidate images in display order, what each
-                        shows, and the proposals and nodes the message points to
+                        shows, and the nodes the message points to
     NNN/feedback.json   written once by a surface: the user's reply, picks, notes on images, attachments, decision
     NNN/attachments/    images the user attaches while the round is open
     NNN/calls.jsonl     the generation calls for the round's candidates
@@ -17,8 +17,7 @@ Three kinds:
   project   what the project is for. The agent asks and writes project.md, the brief every style and generation in
             the project reads.
   style     making a style and improving it. The agent describes the style back in plain words, asks, shows
-            candidates from the draft model, and writes style.md; once the style has references, changes go to
-            the user as proposals (proposal.py) tried with probes.
+            candidates from the draft model, and writes style.md, recording each change as a revision.
   ideation  working out an image with a style for a user who does not know yet what to make. The agent, as the
             designer, writes brief.md; the user's "generate" turns the brief into a generation node.
 
@@ -27,7 +26,7 @@ Commands:
   open <style> style|ideation [--message M]   open a thread about a style or an image; a message is the user's first
                                               words, answering its opening
   next <thread>                               print the directory for the thread's next round, creating it
-  publish <round dir> [--note N] [--describe D ...] [--proposal ID ...] [--node ID ...] [files]
+  publish <round dir> [--note N] [--describe D ...] [--node ID ...] [files]
   show <thread>                               the thread as the surfaces see it
   answer <thread> [--picked 1,3] [--note 2=text] [--comment C] [--decision generate]
   rename <thread> <name>
@@ -51,7 +50,6 @@ DECISIONS = {"project": {None}, "style": {None}, "ideation": {None, "generate"}}
 # What the user reads first. The rounds keep it, since a round records what was shown.
 NEW_STYLE_QUESTION = "어떤 스타일을 만들까요? 스타일은 그림에 무엇이 나오는지가 아니라, 어떤 그림이든 같은 느낌으로 그리는 방식이에요. 납작한 벡터인지 손그림인지 3D인지, 선과 색, 빛과 질감 같은 것들이요. 어디에 쓸 그림인지, 떠오르는 느낌을 편하게 적어 주세요. 비슷한 느낌의 이미지가 있으면 함께 올려 주세요."
 STYLE_QUESTION = "{style} 에서 무엇을 바꿀까요? 고치고 싶은 점, 더하고 싶은 모델, 레퍼런스 이야기 모두 괜찮아요."
-GUIDE_QUESTION = "어떤 가이드를 만들까요? 가이드는 혼자 그리지 않고, 이어받는 스타일에 색이나 형태 같은 일부 규칙을 더해요. 브랜드 색, 디자인 시스템처럼 지킬 것을 적어 주세요. 견본 이미지가 있으면 함께 올려 주세요."
 NEW_PROJECT_QUESTION = "이 프로젝트는 무엇을 위한 건가요? 그림이 어디에 쓰이는지, 누가 보는지, 지켜야 할 브랜드 색이나 톤이 있는지 편하게 적어 주세요. 대화를 바탕으로 프로젝트 브리프를 정리해 둘게요. 모든 스타일과 생성이 이 브리프를 읽어요."
 PROJECT_QUESTION = "브리프에서 무엇을 바꿀까요? 목적, 쓰는 곳, 보는 사람, 브랜드 색과 톤, 프로젝트 차원의 결정 모두 괜찮아요."
 IDEATION_QUESTION = "어떤 이미지가 필요하세요? 어디에 쓸지, 누가 보는지, 떠오르는 것을 편하게 적어 주세요. 참고할 이미지가 있으면 함께 올려 주세요."
@@ -165,7 +163,7 @@ class Thread:
     def view(self):
         return {**self.summary(), "brief": self.brief(), "rounds": [item.view() for item in self.published()]}
 
-    def publish(self, directory, note, files=None, descriptions=(), proposals=(), nodes=()):
+    def publish(self, directory, note, files=None, descriptions=(), nodes=()):
         directory = Path(directory)
         if directory.parent != self.directory or not directory.name.isdigit():
             raise RecordError(f"{directory} is not a round of thread {self.id}")
@@ -174,16 +172,11 @@ class Thread:
         if len(descriptions) not in (0, len(candidates)):
             raise RecordError(f"{len(descriptions)} descriptions for {len(candidates)} images")
         style = self.style
-        if proposals and not style:
-            raise RecordError(f"thread {self.id} has no style to propose changes to")
-        for identifier in proposals:
-            from proposal import Proposal
-            Proposal(style, identifier)
         known = {node.id for node in self.project.nodes()}
         for identifier in nodes:
             if identifier not in known:
                 raise RecordError(f"{self.project.name} has no node {identifier}")
-        record = {"note": note, "candidates": candidates, "descriptions": dict(zip(candidates, descriptions)), "proposals": list(proposals), "nodes": list(nodes), "time": timestamp()}
+        record = {"note": note, "candidates": candidates, "descriptions": dict(zip(candidates, descriptions)), "nodes": list(nodes), "time": timestamp()}
         # What the user saw is copied in, since style.md and the briefs change while they are written.
         if style:
             record["spec"] = style.spec()
@@ -233,7 +226,6 @@ class Round:
             "time": self.record.get("time"),
             "spec": self.record.get("spec"),
             "brief": self.record.get("brief"),
-            "proposals": self.record.get("proposals", []),
             "nodes": self.record.get("nodes", []),
             "candidates": [{
                 "number": number,
@@ -277,7 +269,7 @@ class Round:
             # The brief comes down to the canvas as a generation node; the thread keeps going beside it.
             brief = self.thread.brief()
             heading = next((line for line in brief.splitlines() if line.strip()), "").lstrip("# ").strip()
-            node = Node.create(self.project, "generation", f"{heading}\n\n{brief}".strip() if heading else brief, self.thread.record["style"], thread=self.thread.id, surface=surface)
+            node = Node.create(self.project, "generation", f"{heading}\n\n{brief}".strip() if heading else brief, style=self.thread.record["style"], thread=self.thread.id, surface=surface)
             feedback["node"] = node.id
             write_json(self.directory / "feedback.json", feedback)
         return feedback
@@ -313,7 +305,7 @@ def open_project_thread(project, message="", attachments=(), surface="chat"):
 def open_style_thread(style, first=False, message="", attachments=(), surface="chat"):
     """A conversation about a style: making it when it is new, improving it otherwise. A message is the user's
     first words, and answers the opening round at once so the agent sees it."""
-    question = (GUIDE_QUESTION if style.guide() else NEW_STYLE_QUESTION) if first else STYLE_QUESTION.format(style=style.name)
+    question = NEW_STYLE_QUESTION if first else STYLE_QUESTION.format(style=style.name)
     thread = Thread.open(style.project, "style", question, style)
     if message.strip() or attachments:
         answer_first(thread, message, attachments, surface)
@@ -350,7 +342,7 @@ def main():
         if arguments.command == "publish":
             directory = workspace.resolve(arguments.directory)
             thread = Thread.at(workspace.relative(directory.parent))
-            thread.publish(directory, arguments.note, arguments.files or None, arguments.describe, arguments.proposal, arguments.node)
+            thread.publish(directory, arguments.note, arguments.files or None, arguments.describe, arguments.node)
             # The agent's publish, unlike the opening question a surface writes, says an agent is at work.
             workspace.heartbeat()
             return
@@ -395,7 +387,6 @@ def parse_arguments():
     publishing.add_argument("directory", help="the round directory printed by next")
     publishing.add_argument("--note", default="", help="the agent's message, in the user's language")
     publishing.add_argument("--describe", action="append", default=[], help="one plain line per image, in order: the reading a candidate tests")
-    publishing.add_argument("--proposal", action="append", default=[], help="a proposal the message points to, repeatable")
     publishing.add_argument("--node", action="append", default=[], help="a node the message points to, repeatable")
     publishing.add_argument("files", nargs="*", help="candidates in display order; defaults to every image drawn into the round")
     answering = commands.add_parser("answer")

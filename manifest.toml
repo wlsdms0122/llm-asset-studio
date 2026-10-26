@@ -6,7 +6,7 @@ version = "1.0.0"
 [package]
 name = "asset-studio"
 version = "0.1.0"
-description = "Makes consistent images for a project through styles that keep improving: styles with revisions, probes, and proposals, images as nodes on a canvas, generated through OpenRouter, with a web studio over the same records"
+description = "Makes consistent images for a project through styles that keep improving: a style's words and the references chosen for it, kept as revisions to draw with, images and texts as nodes on a canvas, generated through OpenRouter, with a web studio over the same records"
 requires = ["python3", "swift"]
 
 [command]
@@ -15,8 +15,6 @@ studio = "python3 source/engine/server.py"
 watch = "python3 source/engine/watch.py"
 project = "python3 source/engine/project.py"
 style = "python3 source/engine/style.py"
-proposal = "python3 source/engine/proposal.py"
-probe = "python3 source/engine/probe.py"
 node = "python3 source/engine/node.py"
 thread = "python3 source/engine/thread.py"
 generate = "python3 source/engine/generate.py"

@@ -3,7 +3,7 @@
 .style-page { max-width: 1120px; padding-top: var(--space-5); }
 .style-page .grow { flex: 1; }
 
-/* head: the way back, the name with its menu, the purpose, the facts (what it includes, the model, the revision) */
+/* head: the way back, the name with its menu, the purpose, the facts (the model, the revision) */
 .style-head > .button { margin-left: calc(-1 * var(--space-3)); color: var(--fg-muted); }
 .style-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-2); }
 .style-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
@@ -12,38 +12,30 @@
 .style-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin-top: var(--space-3); color: var(--fg-muted); font-size: var(--text-sm); }
 .style-facts > * { position: relative; }
 .style-facts > * + *::before { content: ""; position: absolute; left: -10px; top: 50%; width: 3px; height: 3px; margin-top: -1px; border-radius: 50%; background: var(--fg-faint); }
-.style-facts a { color: var(--fg); font-weight: 600; text-decoration: none; }
-.style-facts a:hover { text-decoration: underline; }
 
 .style-notices { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
 .style-notices:empty { display: none; }
-.style-proposals { display: grid; gap: var(--space-4); margin-top: var(--space-5); }
-.style-proposals:empty { display: none; }
 
 /* the tabs stay under the app bar while the page scrolls */
 .style-tabs { position: sticky; top: var(--appbar); z-index: 6; margin-top: var(--space-5); background: var(--bg); }
 .style-body { padding-top: var(--space-5); }
 .style-tab { display: flex; flex-direction: column; gap: var(--space-4); }
 .style-tab > .section-title { margin: var(--space-3) 0 0; }
-/* Long diffs and request lines wrap inside the page instead of widening it. */
-.style-page, .style-tab > *, .proposal > *, .proposal-file > *, .disclosure-body > *, .compare > * { min-width: 0; }
+/* Long diffs wrap inside the page instead of widening it. */
+.style-page, .style-tab > *, .disclosure-body > * { min-width: 0; }
 .notice-text { min-width: 200px; }
 
 .style-card { padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
 .style-card > .section-title:first-child { margin-top: 0; }
 .style-stack { display: flex; flex-direction: column; gap: var(--space-3); }
-.style-toolbar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .style-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .style-actions .muted { font-size: var(--text-sm); }
 .style-hint { margin: 0; color: var(--fg-muted); font-size: var(--text-sm); }
-.style-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--fg-faint); font-size: var(--text-sm); }
-.style-meta a { color: var(--fg-muted); }
-.style-id { flex: none; padding: 1px 7px; border-radius: 6px; background: var(--surface-sunken); color: var(--fg-muted); font: 600 var(--text-xs)/1.6 var(--mono); }
 .style-tab-rules .style-card { padding-top: var(--space-2); }
 .style-tab-rules .markdown { max-width: 860px; }
 .style-tab-rules .markdown > p:first-child { margin-top: var(--space-3); }
 
-/* a block that opens and closes: a run, a revision, a decided proposal */
+/* a block that opens and closes: a revision, the rules at a revision */
 .disclosure > summary { display: flex; align-items: center; gap: var(--space-2); min-width: 0; list-style: none; cursor: pointer; }
 .disclosure > summary::-webkit-details-marker { display: none; }
 .disclosure-mark { display: grid; color: var(--fg-faint); transform: rotate(-90deg); transition: transform .15s; }
@@ -53,39 +45,9 @@
 .disclosure-body { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-4); }
 .style-card.disclosure { padding: var(--space-3) var(--space-4); }
 .style-card.disclosure[open] { padding-bottom: var(--space-5); }
+.disclosure { scroll-margin-top: calc(var(--appbar) + 60px); }
 .focused { animation: focused 1.8s var(--ease); }
 @keyframes focused { 0%, 50% { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); } }
-
-/* proposals */
-.proposal { display: flex; flex-direction: column; gap: var(--space-4); scroll-margin-top: calc(var(--appbar) + 60px); }
-.decided { scroll-margin-top: calc(var(--appbar) + 60px); }
-.proposal-head { display: flex; align-items: center; gap: var(--space-2); }
-.proposal-head h3 { flex: 1; min-width: 0; margin: 0; font-size: var(--text-lg); letter-spacing: -.01em; }
-.proposal-reason { margin: 0; white-space: pre-wrap; }
-.proposal-file { display: flex; flex-direction: column; gap: var(--space-2); }
-.proposal-file-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); font-weight: 600; color: var(--fg-muted); }
-.proposal-file-head code { font: 600 var(--text-sm) var(--mono); color: var(--fg); }
-.proposal-images { display: flex; flex-wrap: wrap; gap: var(--space-4); }
-.proposal-image { display: grid; gap: 6px; margin: 0; }
-.proposal-image .thumb { width: 104px; height: 104px; cursor: default; }
-.proposal-image.removed .thumb img { opacity: .45; filter: grayscale(1); }
-.proposal-image figcaption { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--fg-muted); }
-
-/* a proposal's probes next to the current revision's, request by request */
-.compare { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--line); }
-.compare-title { display: flex; align-items: center; gap: var(--space-2); }
-.compare-note { margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); font-size: var(--text-md); white-space: pre-wrap; }
-.compare-grid { display: flex; flex-direction: column; gap: var(--space-3); }
-.compare-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 220px)); gap: var(--space-3); align-items: start; }
-.compare-labels { position: sticky; top: calc(var(--appbar) + 43px); z-index: 2; padding: var(--space-2) 0; background: var(--surface); color: var(--fg-muted); font-size: var(--text-xs); font-weight: 700; }
-.compare-request { margin: 0; font-size: var(--text-md); }
-.probe-missing { aspect-ratio: 1; display: grid; place-items: center; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); color: var(--fg-faint); font-size: var(--text-xs); text-align: center; }
-
-/* probe runs */
-.run-note { margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); font-size: var(--text-md); white-space: pre-wrap; }
-.probe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-4); }
-.probe { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; }
-.probe figcaption { font-size: var(--text-sm); line-height: 1.45; }
 
 /* references */
 .reference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: var(--space-4); }
@@ -99,10 +61,9 @@
 .reference-note dt:first-child { margin-top: 0; }
 .reference-note dd { margin: 0; }
 .reference-waiting { margin: 0; font-size: var(--text-sm); }
-.drawn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--space-3); }
-.drawn { display: grid; gap: 6px; margin: 0; min-width: 0; }
-.drawn figcaption { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-xs); color: var(--fg-muted); }
-.drawn figcaption a, .drawn figcaption span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.text-reference { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-3); }
+.text-reference .reference-head { justify-content: flex-start; }
+.text-reference .markdown { max-width: 860px; }
 
 /* history */
 .revision-number { flex: none; min-width: 28px; height: 24px; padding: 0 6px; display: grid; place-items: center; border-radius: 999px; background: var(--surface-sunken); font: 700 var(--text-xs) var(--mono); }
@@ -110,13 +71,11 @@
 .style-stack:has(> .revision) { gap: 6px; }
 .style-card.revision { padding: var(--space-2) var(--space-4); }
 .style-card.revision[open] { padding-bottom: var(--space-4); }
+.revision-reason { margin: 0; white-space: pre-wrap; }
+.revision-label { margin: 0; color: var(--fg-muted); font-size: var(--text-xs); font-weight: 700; }
+.revision-change { display: grid; gap: 6px; }
+.revision-change code { font: 600 var(--text-sm) var(--mono); }
 .revision-spec { max-height: 520px; overflow-y: auto; padding: 0 var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); }
-
-@media (max-width: 900px) {
-  .compare-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .compare-row > :first-child { grid-column: 1 / -1; }
-  .compare-labels > :first-child { display: none; }
-}
 
 @media (max-width: 600px) {
   .style-title { flex-wrap: wrap; }
@@ -125,6 +84,5 @@
   .disclosure-title { flex: 1 1 60%; }
   .disclosure-time { margin-left: 0; padding-left: 0; width: 100%; padding-left: 26px; }
   .reference-grid { grid-template-columns: 1fr; }
-  .probe-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
   .markdown-body { padding-left: 0; }
 }

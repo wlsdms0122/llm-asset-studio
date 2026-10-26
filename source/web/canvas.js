@@ -2,8 +2,8 @@
 
 // The project page: an infinite canvas of everything made in the project, the panel beside it (what the project is
 // for, styles, threads), the composer under it, and the inspector over its right side. A card shows what was asked
-// and what came out; the inspector shows how the selected node was made. An edge runs from a parent's card to the node
-// built on it, and the child names the image it builds on. Frames from canvas.json group nodes under a title and move
+// and what came out, images or a text; the inspector shows how the selected node was made. An edge runs from a
+// parent's card to the node built on it, and the child names the image or text it builds on. Frames from canvas.json group nodes under a title and move
 // them together. A dragged card snaps to the edges and centers of the cards around it.
 // Nodes the user has not placed are laid out by lineage: roots by frame and time, each child to the right of its parent.
 
@@ -23,14 +23,15 @@ const SNAP = 6;
 
 const board = {};
 
-// picked: image paths the next request builds on. selected: node ids the inspector shows and a drag moves together.
+// picked: paths of the images and texts the next request builds on. selected: node ids the inspector shows and a drag
+// moves together. draft.style is a style's name or TEXT; draft.revision is a revision number, or null for the latest.
 function resetBoard(project) {
   Object.assign(board, {
     project, data: null, canvasSignature: null, panelSignature: null, stylesSignature: null, inspectorSignature: null,
     view: null, cards: new Map(), sizes: new Map(), geometry: new Map(), chips: new Map(), positions: {}, saved: {},
     saveTimer: null, saving: false, viewTimer: null,
     picked: new Set(), selected: new Set(),
-    draft: { text: "", attachments: [], style: null }, composer: null, sending: false,
+    draft: { text: "", attachments: [], style: null, revision: null }, composer: null, sending: false,
     focus: null, spaceHeld: false, frame: null, dragging: null
   });
 }
@@ -82,9 +83,9 @@ function buildBoard(at) {
       h("div", { class: "canvas-nodes", id: "canvas-nodes" }),
       svgNode("svg", { class: "canvas-guides", id: "canvas-guides", width: 1, height: 1 })
     ]),
-    h("div", { class: "canvas-empty", id: "canvas-empty", hidden: true }, [emptyState({ title: t("Nothing on the canvas yet"), text: t("Write what to draw below, or upload images.") })]),
+    h("div", { class: "canvas-empty", id: "canvas-empty", hidden: true }, [emptyState({ title: t("Nothing on the canvas yet"), text: t("Write below what to draw or write, or upload images and texts.") })]),
     h("div", { class: "canvas-tools top-left" }, [
-      uploadButton(t("Upload images"), uploadNodes, { iconName: "upload", label: t("Upload"), variant: "ghost" })
+      uploadButton(t("Upload images and texts"), uploadNodes, { iconName: "upload", label: t("Upload"), variant: "ghost", accept: MATERIAL_FILES })
     ]),
     h("div", { class: "canvas-tools top-right" }, [
       iconButton("minus", t("Zoom out"), () => zoomBy(1 / 1.25), { variant: "ghost", small: true }),
@@ -133,10 +134,7 @@ function renderPanel() {
     ]
   }));
 
-  // A guide shows under the styles that build on it; one no style builds on yet is listed on its own.
-  const guides = new Set(data.styles.filter(style => style.guide).map(style => style.name));
-  const used = new Set(data.styles.flatMap(style => style.extends.filter(name => guides.has(name))));
-  const rows = data.styles.filter(style => !used.has(style.name));
+  const rows = data.styles;
   const threads = [...data.threads].sort((a, b) => b.updated.localeCompare(a.updated));
   fill($("board-panel"),
     sectionTitle(t("Brief")),
@@ -151,19 +149,12 @@ function renderPanel() {
       ]),
 
     sectionTitle(t("Styles"), rows.length ? String(rows.length) : null),
-    rows.length ? rowList(rows.map(style => {
-      const lent = style.extends.filter(name => guides.has(name));
-      const row = listRow({
-        title: style.name,
-        detail: style.missing && style.missing !== "guide" ? blockedReason(style) : style.purpose || null,
-        onClick: () => { location.hash = hashes.style(project, style.name); },
-        aside: style.proposals ? pill(tn("{count} proposal", "{count} proposals", style.proposals), { tone: "accent", small: true }) : null
-      });
-      if (lent.length) row.querySelector(".row-text").append(h("span", { class: "row-links" }, lent.map(name => h("a", {
-        href: hashes.style(project, name), text: name, title: t("Its rules include {style}", { style: name }), onclick: event => event.stopPropagation()
-      }))));
-      return row;
-    })) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
+    rows.length ? rowList(rows.map(style => listRow({
+      title: style.name,
+      detail: style.missing ? blockedReason(style) : style.purpose || null,
+      onClick: () => { location.hash = hashes.style(project, style.name); },
+      aside: style.revisions.length ? h("span", { class: "muted", text: `r${style.revisions.length}` }) : null
+    }))) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
     h("div", { class: "row" }, [button(t("New style"), { small: true, iconName: "plus", onClick: newStyle })]),
 
     sectionTitle(t("Threads"), drawableStyles().length ? button(t("New ideation"), { small: true, variant: "ghost", iconName: "plus", onClick: newIdeation }) : null),
@@ -179,7 +170,6 @@ function renderPanel() {
 
 const drawableStyles = () => board.data.styles.filter(style => style.missing == null);
 
-// Whether the new style draws or only lends its rules to others is worked out in its thread.
 function newStyle() {
   return askName({
     title: t("New style"),
@@ -227,25 +217,38 @@ function pendingFrame(node) {
   return h("div", { class: `pending-frame${idle ? " idle" : ""}` }, [idle ? null : h("span", { class: "spinner" }), h("span", { text })]);
 }
 
-// An image on the canvas named by its node and its number there (null when it is the node's only image).
-function imageOnCanvas(path) {
+const isText = path => /\.(md|txt)$/i.test(path);
+
+// An image or a text on the canvas named by its node and, for one of several images, its number there.
+function outputOnCanvas(path) {
   const node = nodeById(nodeOfPath(path));
   if (!node) return null;
   const index = node.images.findIndex(image => image.path === path);
   return { path, node: node.id, number: node.images.length > 1 && index >= 0 ? index + 1 : null };
 }
 
-// The images on the canvas a node builds on.
-const parentImages = node => node.parents.filter(path => nodeOfPath(path) !== node.id).map(imageOnCanvas).filter(Boolean);
+// The images and texts on the canvas a node builds on.
+const parentImages = node => node.parents.filter(path => nodeOfPath(path) !== node.id).map(outputOnCanvas).filter(Boolean);
 
 const parentLabel = item => item.number ? `${item.node} · ${pad(item.number)}` : item.node;
 const parentTitle = item => item.number ? t("Builds on {node}, image {number}", { node: item.node, number: pad(item.number) }) : t("Builds on {node}", { node: item.node });
+
+// A written text on its card: its start, picked by a click like an image, read whole in the inspector.
+function textBlock(node) {
+  return h("div", { class: "node-text", "data-path": node.text_path }, [markdownView(node.text)]);
+}
+
+function downloadText(node) {
+  const link = h("a", { href: URL.createObjectURL(new Blob([node.text], { type: "text/markdown" })), download: `${board.project}-${node.id}.md` });
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
 
 function nodeHead(node, extra = []) {
   return [
     h("span", { class: "node-id", text: node.id }),
     h("span", { class: "node-kind", text: node.tool ? TOOL_NAMES[node.tool] : KIND_NAMES[node.kind] }),
-    node.style ? h("a", { class: "node-style", href: hashes.style(board.project, node.style), text: node.style }) : null,
+    node.style ? h("a", { class: "node-style", href: hashes.style(board.project, node.style, node.revision), text: `${node.style} · r${node.revision}`, title: t("{style} at revision {revision}", { style: node.style, revision: node.revision }) }) : null,
     h("span", { class: "grow" }),
     statusPill(node),
     tool("more", t("More"), event => openNodeMenu(node, event), { quiet: true }),
@@ -268,7 +271,7 @@ function nodeCard(node) {
         number: several ? index + 1 : null,
         tools: [tool("zoom", t("Enlarge"), () => openLightbox(items, index)), tool("more", t("More"), event => openImageMenu(node, image, event))]
       })
-    ]))) : ["queued", "drawing", "running"].includes(node.status) ? pendingFrame(node) : null,
+    ]))) : node.text != null ? textBlock(node) : ["queued", "drawing", "running"].includes(node.status) ? pendingFrame(node) : null,
     node.status === "failed" ? h("p", { class: "node-error", text: node.error || t("Nothing came out of this request.") }) : null
   ]);
   card.addEventListener("contextmenu", event => {
@@ -283,7 +286,10 @@ function nodeCard(node) {
 const frameIndexOf = id => board.data.canvas.frames.findIndex(frame => frame.nodes.includes(id));
 
 function openNodeMenu(node, event) {
+  const written = node.text != null;
   openMenu({ x: event.clientX, y: event.clientY }, [
+    written ? { label: t("Add to references"), onClick: () => addToReferences(board.project, node.text_path, board.data.styles) } : null,
+    written ? { label: t("Download"), onClick: () => downloadText(node) } : null,
     node.thread ? { label: t("Open the thread"), onClick: () => { location.hash = hashes.thread(board.project, node.thread); } } : null,
     { label: t("Delete"), danger: true, onClick: () => deleteNode(node) }
   ]);
@@ -303,7 +309,7 @@ async function deleteNode(node) {
   if (!await confirmDelete(t("Delete {name}", { name: node.id }), t("The request and its images are deleted. Nodes built on it stay."))) return;
   try {
     await api("/api/nodes/delete", { project: board.project, node: node.id });
-    node.images.forEach(image => board.picked.delete(image.path));
+    [...node.images.map(image => image.path), node.text_path].forEach(path => board.picked.delete(path));
     board.selected.delete(node.id);
     syncSelection();
     load();
@@ -345,7 +351,7 @@ function renderInspector() {
 const inspectorSection = (title, ...children) => h("section", { class: "inspector-section" }, [h("h3", { text: title }), ...children]);
 
 const parentChip = (project, item) => h("button", { class: "node-parent", type: "button", "data-path": item.path, title: parentTitle(item), onclick: () => showNode(item.node) }, [
-  h("img", { src: fileUrl(inProject(project, item.path)), alt: "", loading: "lazy" }),
+  isText(item.path) ? h("span", { class: "node-parent-text", html: icon("memo") }) : h("img", { src: fileUrl(inProject(project, item.path)), alt: "", loading: "lazy" }),
   h("span", { text: parentLabel(item) })
 ]);
 
@@ -366,6 +372,10 @@ function nodeDetail(node) {
     })))) : null,
     node.status === "failed" ? notice(node.error || t("Nothing came out of this request."), { tone: "danger" }) : null,
     node.note || notes.length ? inspectorSection(t("Agent's note"), node.note ? h("p", { class: "inspector-text", text: node.note }) : null, ...notes) : null,
+    node.text != null ? inspectorSection(t("Text"), h("div", { class: "inspector-document" }, [markdownView(node.text)]), h("div", { class: "row" }, [
+      button(t("Add to references"), { small: true, iconName: "reference", onClick: () => addToReferences(project, node.text_path, board.data.styles) }),
+      button(t("Download"), { small: true, variant: "ghost", iconName: "download", onClick: () => downloadText(node) })
+    ])) : null,
     node.images.length || node.model || node.tool ? inspectorSection(t("Made with"), specList([
       node.tool ? [t("Tool"), TOOL_NAMES[node.tool] || node.tool] : node.model ? [t("Model"), shortModel(node.model)] : null,
       node.style ? [t("Style"), node.revision ? t("{style} at revision {revision}", { style: node.style, revision: node.revision }) : node.style] : null,
@@ -467,7 +477,7 @@ function renderCanvas() {
     board.cards.set(node.id, { element, key });
   }
   $("canvas-empty").hidden = nodes.length > 0;
-  const paths = new Set(nodes.flatMap(node => node.images.map(image => image.path)));
+  const paths = new Set(nodes.flatMap(node => [...node.images.map(image => image.path), node.text_path].filter(Boolean)));
   [...board.picked].forEach(path => { if (!paths.has(path)) board.picked.delete(path); });
   [...board.selected].forEach(id => { if (!known.has(id)) board.selected.delete(id); });
   layoutCanvas();
@@ -570,9 +580,9 @@ function measureCards() {
   board.chips = new Map();
   for (const [id, card] of board.cards) {
     const border = card.element.clientTop;
-    card.element.querySelectorAll(".node-image").forEach(image => {
-      const frame = image.querySelector(".frame");
-      board.geometry.set(image.dataset.path, { y: frame.offsetTop + border, height: frame.offsetHeight });
+    card.element.querySelectorAll(".node-image, .node-text").forEach(output => {
+      const box = output.querySelector(".frame") || output;
+      board.geometry.set(output.dataset.path, { y: box.offsetTop + border, height: box.offsetHeight });
     });
     card.element.querySelectorAll(".node-parent").forEach(chip => board.chips.set(`${id}|${chip.dataset.path}`, chip.offsetTop + border + chip.offsetHeight / 2));
   }
@@ -790,8 +800,8 @@ function bindViewport(viewport) {
       drawGuides([]);
       if (moved && moving.length) return placeByHand();
       if (moved || ended.type === "pointercancel" || event.button !== 0) return;
-      const image = event.target.closest(".node-image");
-      if (image) { pickImage(image.dataset.path, event.shiftKey); selectNodes([card.dataset.id], event.shiftKey); }
+      const output = event.target.closest(".node-image, .node-text");
+      if (output) { pickOutput(output.dataset.path, event.shiftKey); selectNodes([card.dataset.id], event.shiftKey); }
       else if (card) selectNodes([card.dataset.id], event.shiftKey);
       else if (frame) selectFrame(Number(frame.dataset.index), event.shiftKey);
       else clearSelection();
@@ -809,17 +819,17 @@ function bindViewport(viewport) {
     openLightbox(node.images.map(each => nodeImageItem(board.project, node, each, board.data.styles)), index);
   });
 
-  // Images dropped on the composer go with the next request; dropped anywhere else they become upload nodes.
+  // Images dropped on the composer go with the next request; images and texts dropped anywhere else become upload nodes.
   const column = viewport.parentNode;
   column.addEventListener("dragover", event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); column.classList.add("dropping"); } });
   column.addEventListener("dragleave", event => { if (!column.contains(event.relatedTarget)) column.classList.remove("dropping"); });
   column.addEventListener("drop", event => {
     event.preventDefault();
     column.classList.remove("dropping");
-    const files = [...event.dataTransfer.files].filter(file => /^image\/(png|jpeg|webp)$/.test(file.type));
-    if (!files.length) return;
-    if (event.target.closest(".dock")) addAttachments(files);
-    else uploadNodes(files);
+    const images = [...event.dataTransfer.files].filter(file => /^image\/(png|jpeg|webp)$/.test(file.type));
+    if (event.target.closest(".dock")) return images.length && addAttachments(images);
+    const files = [...event.dataTransfer.files].filter(file => images.includes(file) || isText(file.name));
+    if (files.length) uploadNodes(files);
   });
 }
 
@@ -878,7 +888,7 @@ async function savePositions() {
 
 // ---------- selecting and picking ----------
 
-function pickImage(path, adding) {
+function pickOutput(path, adding) {
   if (adding) {
     if (board.picked.has(path)) board.picked.delete(path);
     else board.picked.add(path);
@@ -914,7 +924,7 @@ function clearSelection() {
 }
 
 function syncSelection() {
-  document.querySelectorAll("#canvas-nodes .node-image").forEach(image => image.classList.toggle("picked", board.picked.has(image.dataset.path)));
+  document.querySelectorAll("#canvas-nodes .node-image, #canvas-nodes .node-text").forEach(output => output.classList.toggle("picked", board.picked.has(output.dataset.path)));
   for (const [id, card] of board.cards) card.element.classList.toggle("selected", board.selected.has(id));
   if (board.data) { drawFrames(); drawEdges(); renderInspector(); }
   syncComposer();
@@ -923,56 +933,81 @@ function syncSelection() {
 // ---------- composer ----------
 
 const styleKey = () => `canvas-style:${board.project}`;
+// What the composer asks for when no style is chosen: a text the agent writes.
+const TEXT = "\u0000text";
+const writing = () => board.draft.style === TEXT;
 
 function buildComposer() {
   board.styleSlot = h("span", { class: "composer-style" });
+  board.revisionSlot = h("span", { class: "composer-style" });
   board.noteSlot = h("span", { class: "composer-note" });
   try { board.draft.style = localStorage.getItem(styleKey()); } catch {}
   board.composer = composer({
     value: board.draft.text,
     placeholder: t("Describe an image to draw"),
-    sendTitle: `${t("Draw")} (⌘↵)`,
+    sendTitle: `${t("Send")} (⌘↵)`,
     onInput: value => { board.draft.text = value; syncComposer(); },
     onSend: sendRequest,
     attach: uploadButton(t("Attach images"), addAttachments, { variant: "ghost" }),
-    tools: [board.styleSlot, board.noteSlot]
+    tools: [board.styleSlot, board.revisionSlot, board.noteSlot]
   });
   fill($("board-dock"), board.composer);
 }
 
+// The styles that can draw, then a text; next to a style, the revision to draw with, the latest unless one is chosen.
 function renderComposerStyles() {
   const styles = drawableStyles();
-  const signature = JSON.stringify(styles.map(style => style.name));
+  const chosen = styles.find(style => style.name === board.draft.style);
+  const signature = JSON.stringify([styles.map(style => [style.name, style.revisions]), board.draft.style, board.draft.revision]);
   if (signature === board.stylesSignature) return;
   board.stylesSignature = signature;
-  if (!styles.some(style => style.name === board.draft.style)) board.draft.style = styles.length ? styles[0].name : null;
-  fill(board.styleSlot, styles.length ? dropdown({
+  if (!chosen && !writing()) board.draft.style = styles.length ? styles[0].name : TEXT;
+  const style = styles.find(each => each.name === board.draft.style);
+  if (!style || !style.revisions.some(revision => revision.number === board.draft.revision)) board.draft.revision = null;
+  fill(board.styleSlot, dropdown({
     value: board.draft.style, title: t("Style to draw with"),
-    options: styles.map(style => ({ value: style.name, label: style.name, detail: style.purpose })),
+    options: [
+      ...styles.map(each => ({ value: each.name, label: each.name, detail: each.purpose })),
+      { value: TEXT, label: t("Text"), detail: t("The agent writes it, such as a palette or design tokens") }
+    ],
     onChange: value => {
       board.draft.style = value;
+      board.draft.revision = null;
       try { localStorage.setItem(styleKey(), value); } catch {}
-      board.stylesSignature = null;
       renderComposerStyles();
     }
-  }) : h("span", { class: "composer-note", text: t("No style can draw yet") }));
+  }));
+  const latest = style ? style.revisions.length : 0;
+  fill(board.revisionSlot, style && style.revisions.filter(revision => !revision.blocked).length > 1 ? dropdown({
+    value: board.draft.revision, title: t("Revision to draw with"),
+    options: [
+      { value: null, label: t("Latest (r{revision})", { revision: latest }) },
+      ...[...style.revisions].reverse().slice(1).filter(revision => !revision.blocked).map(revision => ({ value: revision.number, label: `r${revision.number}`, detail: revision.summary }))
+    ],
+    onChange: value => { board.draft.revision = value; renderComposerStyles(); }
+  }) : null);
+  board.composer.input.placeholder = writing() ? t("Describe a text to write") : t("Describe an image to draw");
   syncComposer();
 }
 
-// The picked images go with the request as its parents; the attachments go as images the request shows.
+// The picked images and texts go with the request as its parents; the attachments go as images the request shows.
 function syncComposer() {
   if (!board.composer || !board.data) return;
   const project = board.project;
   const picked = [...board.picked];
-  const label = path => { const item = imageOnCanvas(path); return item ? parentLabel(item) : nodeOfPath(path); };
+  const label = path => { const item = outputOnCanvas(path); return item ? parentLabel(item) : nodeOfPath(path); };
   board.composer.setImages([
-    ...picked.map(path => ({ key: `pick|${path}`, node: thumb(inProject(project, path), { picked: true, badge: label(path), title: t("Builds on this image"), remove: () => { board.picked.delete(path); syncSelection(); } }) })),
+    ...picked.map(path => ({ key: `pick|${path}`, node: isText(path)
+      ? h("span", { class: "text-chip picked", title: t("Builds on this text"), html: icon("memo") + `<span>${escapeHtml(label(path))}</span>` }, [h("button", { class: "remove", type: "button", title: t("Remove"), html: icon("close"), onclick: () => { board.picked.delete(path); syncSelection(); } })])
+      : thumb(inProject(project, path), { picked: true, badge: label(path), title: t("Builds on this image"), remove: () => { board.picked.delete(path); syncSelection(); } }) })),
     ...board.draft.attachments.map(item => ({ key: `attachment|${item.key}`, node: thumb(item.name, { src: item.url, title: item.name, remove: () => removeAttachment(item) }) }))
   ]);
-  // Without a style that can draw, the style slot already says why nothing can be sent.
-  board.noteSlot.hidden = !board.draft.style;
-  board.noteSlot.textContent = !picked.length ? t("New image") : picked.length === 1 ? t("Refines {node}", { node: label(picked[0]) }) : tn("Builds on {count} image", "Builds on {count} images", picked.length);
-  board.composer.send.disabled = board.sending || !board.draft.style || !board.draft.text.trim();
+  const blocked = writing() && board.draft.attachments.length > 0;
+  board.noteSlot.textContent = blocked ? t("Images are attached to a drawing")
+    : !picked.length ? (writing() ? t("New text") : t("New image"))
+    : picked.length === 1 ? t("Based on {node}", { node: label(picked[0]) }) : t("Based on {count} picked", { count: picked.length });
+  board.noteSlot.classList.toggle("warning", blocked);
+  board.composer.send.disabled = board.sending || blocked || !board.draft.text.trim();
 }
 
 let attachmentCount = 0;
@@ -992,7 +1027,7 @@ function removeAttachment(item) {
 async function sendRequest() {
   const draft = board.draft;
   const box = board.composer;
-  if (board.sending || !draft.style || !draft.text.trim()) return;
+  if (board.composer.send.disabled) return;
   const parents = [...board.picked];
   const attachments = [...draft.attachments];
   board.sending = true;
@@ -1000,8 +1035,8 @@ async function sendRequest() {
   box.input.disabled = true;
   try {
     const made = await api("/api/nodes", {
-      project: board.project, kind: "generation", style: draft.style, request: draft.text,
-      parents, attachments: attachments.map(({ name, data }) => ({ name, data }))
+      project: board.project, kind: "generation", request: draft.text, parents,
+      ...(writing() ? {} : { style: draft.style, revision: draft.revision, attachments: attachments.map(({ name, data }) => ({ name, data })) })
     });
     box.input.disabled = false;
     // Another project was opened meanwhile, so its board is not this one's.

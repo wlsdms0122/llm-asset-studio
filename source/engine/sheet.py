@@ -3,7 +3,6 @@
 
   a thread      the candidates of its latest round, numbered as `thread answer --picked` reads them
   a node        its images, in display order
-  a probe run   its images, one per request, in request order
 
 Needs Pillow.
 """
@@ -15,7 +14,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 import workspace
 from node import Node
-from probe import ProbeRun
 from project import Project
 from thread import Thread
 from workspace import RecordError
@@ -66,9 +64,7 @@ def shown(path):
     if len(parts) == 4 and parts[2] == "nodes":
         view = Node.at(path).view()
         return Project.at(path), [image["path"] for image in view["images"]], [image["description"] for image in view["images"]], workspace.resolve(path)
-    run = ProbeRun.at(path)
-    images = [image for image in run.view()["images"] if image["path"]]
-    return run.style.project, [image["path"] for image in images], [image["request"] for image in images], run.directory
+    raise RecordError(f"{path} is not a thread or a node")
 
 
 def label_font(size):
@@ -81,8 +77,8 @@ def label_font(size):
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("target", help="a thread, a node, or a probe run folder")
-    parser.add_argument("--out", help="PNG to write; defaults to sheet.png in the round, node, or run folder")
+    parser.add_argument("target", help="a thread or a node folder")
+    parser.add_argument("--out", help="PNG to write; defaults to sheet.png in the round or node folder")
     parser.add_argument("--columns", type=int, default=3)
     parser.add_argument("--size", type=int, default=512, help="tile width in pixels")
     return parser.parse_args()

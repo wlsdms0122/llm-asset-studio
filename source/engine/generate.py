@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Generate images through the OpenRouter Images API into a node, a probe run, or a thread's next round, and record
-every call next to the images it made (calls.jsonl).
+"""Generate images through the OpenRouter Images API into a node or a thread's next round, and record every call next
+to the images it made (calls.jsonl).
 
-The prompt is always written by the agent (--prompt or --prompt-file), from the effective style.md, the style's
-prompting file, and document/prompting.md. References are chosen per generation (document/workflow.md) and attached
+The prompt is always written by the agent (--prompt or --prompt-file), from style.md and the prompting file at the
+node's revision, and document/prompting.md. References are chosen per generation (document/workflow.md) and attached
 in the order given (--ref), each recorded with its role and its object, so the record keeps naming the image after
 the style's references change.
 
-  node        projects/<p>/nodes/<id>: draws with the node's style and its model, and records the style's revision
-  probe run   projects/<p>/styles/<s>/runs/<n>: draws with the run's model, for its revision or proposal
+  node        projects/<p>/nodes/<id>: draws with the model of the node's style at the node's revision
   thread      projects/<p>/threads/<id>: draws the candidates of the next round; give the draft model with --model
 
 The API key is the workspace's (see workspace.py).
@@ -39,29 +38,21 @@ class Target:
 
     def __init__(self, path):
         from node import Node
-        from probe import ProbeRun
         from thread import Thread
         directory = workspace.resolve(path)
         parts = workspace.relative(directory).split("/")
         if len(parts) == 4 and parts[2] == "nodes":
             node = Node.at(path)
-            if node.kind != "generation" or node.result() is not None:
-                raise RecordError(f"{node.id} is not waiting for a generation")
-            self.project, self.directory, self.style = node.project, node.directory, node.project.style(node.style)
-            self.model, self.revision = self.style.model(), self.style.revision
-        elif len(parts) == 6 and parts[4] == "runs":
-            run = ProbeRun.at(path)
-            if run.result() is not None:
-                raise RecordError(f"run {run.number} is already published")
-            self.project, self.directory, self.style = run.style.project, run.directory, run.style
-            self.model = run.record["model"]
-            self.revision = lambda: run.record.get("revision") or f"proposal {run.record['proposal']}"
+            if node.output != "image" or node.kind != "generation" or node.result() is not None:
+                raise RecordError(f"{node.id} is not waiting for images")
+            self.project, self.directory, self.revision = node.project, node.directory, node.revision
+            self.model = node.project.style(node.style).snapshot(self.revision).config()["model"]
         elif len(parts) == 4 and parts[2] == "threads":
             thread = Thread.at(path)
-            self.project, self.directory, self.style = thread.project, thread.next_round(), thread.style
-            self.model, self.revision = None, lambda: None
+            self.project, self.directory = thread.project, thread.next_round()
+            self.model, self.revision = None, None
         else:
-            raise RecordError(f"{path} is not a node, a probe run, or a thread")
+            raise RecordError(f"{path} is not a node or a thread")
 
 
 def main():
@@ -118,7 +109,8 @@ def reference(project, item):
     note = annotation(file) or {}
     return {
         "file": file,
-        "path": project.relative(file) if workspace.inside(file, project.path) else workspace.relative(file),
+        # A reference attached from a materialized revision is named by its file; its object says which image it was.
+        "path": project.relative(file) if workspace.inside(file, project.path) else file.name,
         "object": workspace.put_object(file.read_bytes()),
         "role": role or note.get("role") or ("style" if file.parent.name == "references" else "attachment")
     }
@@ -132,7 +124,7 @@ def generate(target, arguments, model, prompt, references, body, dropped, output
     entry = {
         "time": timestamp(),
         "model": model,
-        "revision": target.revision(),
+        "revision": target.revision,
         "request": arguments.request,
         "prompt": prompt,
         "references": [{key: item[key] for key in ("path", "object", "role")} for item in references],
@@ -161,12 +153,12 @@ def generate(target, arguments, model, prompt, references, body, dropped, output
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("target", help="a node, a probe run, or a thread folder")
+    parser.add_argument("target", help="a node or a thread folder")
     parser.add_argument("--prompt")
     parser.add_argument("--prompt-file")
-    parser.add_argument("--model", help="OpenRouter model id; defaults to the node's style model or the run's model")
-    parser.add_argument("--ref", action="append", default=[], help="[role=]image to attach, in order, repeatable: a style reference, a subject, an attachment, a parent image; role is style, subject, composition, or guide")
-    parser.add_argument("--request", help="the user's words, or the probe, before the agent turned them into the prompt")
+    parser.add_argument("--model", help="OpenRouter model id; defaults to the model of the node's style at its revision")
+    parser.add_argument("--ref", action="append", default=[], help="[role=]image to attach, in order, repeatable: a style reference, a subject, an attachment, a parent image; role is style, subject, or composition")
+    parser.add_argument("--request", help="the user's words, before the agent turned them into the prompt")
     parser.add_argument("--into", help="a subfolder for these images, to keep candidates apart")
     parser.add_argument("--n", type=int, help="images wanted; split into as many calls as the model needs")
     parser.add_argument("--aspect-ratio")

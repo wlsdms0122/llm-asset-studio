@@ -4,7 +4,7 @@ How the agent reviews generated images before the user sees them. Reviewing look
 
 ## Inputs
 
-- The style: the effective `style.md` (its Checks section first), the references attached to the generation with their annotations, and `prompting/<model>.md` for how the prompt was written.
+- The style at the node's revision: `style.md` (its Checks section first), its text references, the image references attached to the generation with their annotations, and `prompting/<model>.md` for how the prompt was written.
 - The request each image was made for, the prompt written from it, and the references left out.
 - Each candidate opened at full resolution, plus close crops of the main subject. A contact sheet or thumbnail hides malformed leaves, fingers, and edges; it is for comparing images, not for judging one. File names and call records are not evidence of what an image shows.
 
@@ -39,4 +39,4 @@ Oversaturated color, plastic or waxy surfaces, flat even lighting with no shadow
 
 ## Record
 
-Record every verdict with the image it is about (`node.py publish --review` or `probe.py publish --review`, one per image). Reviews are the agent's record and the studio does not show them; the user sees what follows from them (an image fixed or redrawn, a proposal). In a conversation report, give them after the user's answer, so they do not steer which image the user takes. A report that says "all passed" without a line per image has not been judged. Agreement between these verdicts and the user's choices decides how much of the user review can be skipped later.
+Record every verdict with the image it is about (`node.py publish --review`, one per image). Reviews are the agent's record and the studio does not show them; the user sees what follows from them (an image fixed or redrawn, a change to the style). In a conversation report, give them after the user's answer, so they do not steer which image the user takes. A report that says "all passed" without a line per image has not been judged. Agreement between these verdicts and the user's choices decides how much of the user review can be skipped later.
