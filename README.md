@@ -83,6 +83,7 @@ source/
     sheet.py           a round or a node as one numbered image
   web/                 the web studio; its README.md is the design system and the pages
   verify.py            the end-to-end check behind `verify`
+  perf.mjs             the canvas's pan and zoom cost from a Chrome trace (`node source/perf.mjs <port> <project>`)
 ```
 
 ## License
