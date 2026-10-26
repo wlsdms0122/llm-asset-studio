@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Draw images as one numbered contact sheet, for showing them in conversation.
 
-  a thread      the candidates of its latest round, numbered as `thread answer --picked` reads them
+  a thread      the images of the nodes its latest round shows, numbered as `thread answer --picked` reads them
   a node        its images, in display order
 
 Needs Pillow.
@@ -40,7 +40,7 @@ def main():
 
     for index, (path, text) in enumerate(zip(paths, labels)):
         left, top = (index % columns) * size, (index // columns) * (size + LABEL)
-        label = f"{index + 1}  {text or ''}".rstrip()
+        label = text.rstrip()
         while len(label) > 2 and draw.textlength(label, font=font) > size - 16:
             label = label[:-2] + "…"
         draw.text((left + 8, top + 6), label, fill="black", font=font)
@@ -52,18 +52,18 @@ def main():
 
 
 def shown(path):
-    """The project, the images in order with a label each, and where the sheet goes by default."""
+    """The project, the images in order labeled with their numbers, and where the sheet goes by default."""
     parts = workspace.relative(workspace.resolve(path)).split("/")
     if len(parts) == 4 and parts[2] == "threads":
         thread = Thread.at(path)
         current = thread.latest()
         if current is None:
             raise RecordError("no round to draw")
-        candidates = current.record["candidates"]
-        return thread.project, candidates, [current.record.get("descriptions", {}).get(item) for item in candidates], current.directory
+        shown = [item for item in current.candidates(current.shown({node.id: node for node in thread.project.nodes()})) if item["image"]]
+        return thread.project, [item["path"] for item in shown], [f"{item['number']}  {item['image']['description'] or ''}" for item in shown], current.directory
     if len(parts) == 4 and parts[2] == "nodes":
         view = Node.at(path).view()
-        return Project.at(path), [image["path"] for image in view["images"]], [image["description"] for image in view["images"]], workspace.resolve(path)
+        return Project.at(path), [image["path"] for image in view["images"]], [f"{number}  {image['description'] or ''}" for number, image in enumerate(view["images"], 1)], workspace.resolve(path)
     raise RecordError(f"{path} is not a thread or a node")
 
 

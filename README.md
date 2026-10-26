@@ -27,7 +27,7 @@ open-package project <command> ...        # new, rename, delete
 open-package style <command> ...          # new, revise, show, materialize, annotate, set-check, restore, rename, delete, reference-add, reference-remove, use, model-remove
 open-package node <command> ...           # add (a generation drawn or written, a tool, an upload), publish, show, delete
 open-package thread <command> ...         # open, next, publish, show, answer, rename, delete
-open-package generate <target> ...        # draw into a node or a thread's next round through OpenRouter
+open-package generate <node> ...          # draw into a node through OpenRouter
 open-package sheet <target>               # a thread round or a node as one numbered image, for the conversation
 open-package models [--free]              # every image model on OpenRouter with its price, or only the free ones
 open-package key                          # store the OpenRouter API key, typed or piped in
@@ -49,7 +49,7 @@ projects/<project>/
                              leave), and texts (.md)
     revisions.jsonl          every revision: the hash of every file above, what changed, and why
   nodes/<id>/                one request and what came out: node.json, result.json, the images or text.md, calls.jsonl
-  threads/<id>/              conversations about the project's brief, a style, or an image, in rounds
+  threads/<id>/              conversations about the project or a style, in rounds that point to the nodes they show
   canvas.json                where the nodes sit on the canvas and the groups they are in
 objects/                     every version of every style file and reference, by hash
 cache/                       what OpenRouter says about models, kept for a day
@@ -63,7 +63,7 @@ key                          the OpenRouter API key, readable only by you
 document/              what the agent knows and follows
   workflow.md          projects, styles and revisions, references, nodes, threads, the surfaces, every command
   writing-styles.md    what a style is and how style.md is written
-  ideation.md          how the agent, as the designer, works out an image with you and writes its brief
+  ideation.md          how the agent, as the designer, works out an image with you in a project thread
   prompting.md         how to write prompts for image models, for every style
   models.md            what each model can do, costs, and how it reads a prompt
   review.md            how every image is reviewed before you see it

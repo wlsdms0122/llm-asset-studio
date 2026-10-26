@@ -6,15 +6,15 @@ How the agent runs a project: making its styles, improving them, and making imag
 
 The point is consistent images that fit a purpose. A project holds the purpose (`project.md`) and the styles made for it. A style is two things: its words (`style.md`), which the agent writes, and its references, the material the user chose for it: images, and texts such as a palette or design tokens. A style is never finished: every image shows something to improve, so a style is a source that keeps changing, and every change is a revision, like a commit. Every generation draws with a style at one revision, the latest unless the user chooses another, so a change that came out worse is never forced on anyone, and every image records the revision it was drawn with.
 
-The canvas is where material is made: each request is a node, and what comes out of it, images or a text, can go into a style's references or be what the next request builds on.
+The canvas is where material is made: each request is a node, and what comes out of it, images or a text, can go into a style's references or be what the next request builds on. Everything made in a project is a node, whoever asked for it: the user in the composer, or the agent while talking (a draft, a text). A conversation holds words and points to the nodes it shows, so every image and text is in one place.
 
 The web page and the conversation are two surfaces over the same records. Whatever the user does on one is a record the other reads.
 
 ## Projects
 
-A project is one purpose: an app, a blog, a product line (`project.py new <name>`). Its `project.md`, the brief, says what the images are for, where they are seen and at what size, who sees them, the brand's colors and tone, and the decisions that hold for every image in it. The agent reads it before writing any prompt for the project.
+A project is one purpose: an app, a blog, a product line (`project.py new <name>`). Its `project.md`, the brief, says what the images are for, where they are seen and at what size, who sees them, the tone, and the decisions that hold for every image in it, in words. The agent reads it before writing any prompt for the project.
 
-The agent writes the brief, the way it writes a style's words; the user tells. A project thread is that conversation (what the user writes under the brief on its page, or `thread.py open projects/<p> project`): the agent asks what the project is for, writes `project.md` in English, and publishes a round that says what it wrote and what is still open. It keeps the brief current: a decision the user makes for the whole project (the colors of an app), wherever it was said, goes into `project.md`, or into a text on the canvas the user can put into the styles' references, never only into one prompt.
+The agent writes the brief, the way it writes a style's words; the user tells. A project thread is that conversation (what the user writes under the brief on its page, New thread on the canvas, or `thread.py open projects/<p> project`): the agent asks what the project is for, writes `project.md` in English, and publishes a round that says what it wrote and what is still open. It keeps the brief current: a decision the user makes for the whole project, wherever it was said, goes into `project.md`, never only into one prompt. Values (the colors of an app with their hex codes, design tokens) are material, not the brief: the agent writes them as a text on the canvas (see Generating), says the user can put it into the styles' references, and the brief does not repeat them. A project thread is also where the user works out what to make (see Ideation).
 
 A style lives in one project. To use a style in another project, copy it (`style.py new <project> <name> --from <style>`); the copy starts as its own first revision, says where it came from, and grows on its own from there.
 
@@ -32,7 +32,7 @@ The user does not manage versions: revisions pile up on their own, and choosing 
 
 A new style opens a style thread with the first question (`style.py new <project> <name>`, or "New style" on the web). The thread is the conversation that finds the style; see Discovering a style.
 
-1. Discover, in the thread: the agent writes `style.md` from the conversation, shows draft candidates when a picture settles a question faster than words, and asks what changes the image most, recording a revision at each step.
+1. Discover, in the thread: the agent writes `style.md` from the conversation, shows drafts when a picture settles a question faster than words, and asks what changes the image most, recording a revision at each step.
 2. When the words hold, the agent picks the model (`models.md`) and writes `style.json`'s model and `prompting/<model>.md`. From then on the style can draw from its words alone (`Style.blocked` says what is missing until then). The agent records the revision and says in the thread that the style is ready to draw on the canvas, with what an image costs.
 3. The user draws on the canvas and reacts; the agent improves the style (see Improving a style). Any image the user likes, wherever it is shown, can go into the references, and so can a text (a palette, design tokens) written on the canvas or uploaded. The agent annotates each image and checks the set (see References).
 
@@ -55,10 +55,10 @@ Talk comes before pictures. While the direction is unclear, at any point in the 
   - A wide question (which of a few directions): images far apart from each other on that question.
   - A narrow question (how much of one property): images that differ in that one property, with everything else the same, where the agent is least sure and the answer matters most.
   - Whether the words hold: one image from the written style alone, next to near misses that each break one rule on purpose. The user choosing the faithful one, for the reason the rule gives, confirms the words.
-  - Every candidate is labeled with the style difference it shows (`thread.py publish --describe`), and the note says what to compare, what stays the same across them, and what to ignore (the subject, small defects of the draft model). "1 and 2 differ only in the outline: none, or a thin dark line" lets the user answer about the style, and a pick turns straight into a value in `style.md`; unlabeled pictures invite a pick by subject.
+  - Every candidate is labeled with the style difference it shows (`node.py publish --describe` on its draft), and the note says what to compare, what stays the same across them, and what to ignore (the subject, small defects of the draft model). "1 and 2 differ only in the outline: none, or a thin dark line" lets the user answer about the style, and a pick turns straight into a value in `style.md`; unlabeled pictures invite a pick by subject.
   - All candidates show one plain subject from outside the style's domain (a mug, a chair, a potted plant), or from inside it when the style is scoped to that domain. The subject stays the same while a question is open, so a difference between candidates is a difference in style.
 - A style made for a kind of asset (app icons, logos, thumbnails) is judged in use. One plain subject on a plain background settles the rendering, but the user cannot tell from it how the style will feel on real assets. Once the rendering is roughly settled, show it applied: a few made-up uses with different subjects and colors, and a composite of how they sit together where they are seen (icons masked and laid out at home screen sizes). The composite is put together locally and costs nothing.
-- Candidate images come from the draft model (`models.md`: free when a free model can show it, otherwise a cheap paid one after the user says yes). Their job is to show which way the style goes, not quality, and the message says what to look at and what to ignore.
+- Candidates are drafts: generation nodes the agent adds from the thread and draws with the draft model (`node.py add <project> --draft <model> --style <style> --request "<what it tests>" --thread <t>`; `models.md`: free when a free model can show it, otherwise a cheap paid one after the user says yes). A draft draws from the style's words at its revision before the style has a model of its own. Their job is to show which way the style goes, not quality, and the message says what to look at and what to ignore. The round points to the drafts it shows (`thread.py publish <t> --note ... --node n7`), and its candidates are their images in that order, numbered from 1 for picks and notes. The drafts sit on the canvas in a row and are marked as drafts, so any of them can go into the references like any other image.
 - Signs the style is pinned down: the important values have stopped changing; the agent can predict the user's pick before showing it; the image from the written style alone was chosen; every section is filled, with what is undecided marked open. Then the agent writes the model's prompting file and says the style is ready to draw. Signs of fatigue (shorter replies, "anything is fine", picks that flip back and forth) mean stopping to summarize or changing the question, not more images. A conversation that goes on without settling is missing a question: ask a broader one or ask for another reference.
 
 ## Improving a style
@@ -128,12 +128,12 @@ Requests that keep asking for the same change are not about one image; the agent
 
 ## Ideation
 
-For a user who does not know yet what the image should be, an ideation thread works it out in conversation ("New ideation" on a style, or `thread.py open <style> ideation`). The agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick, writing the thread's `brief.md` as the image takes shape. Ideas are drawn with the draft model. When the image is concrete the agent proposes drawing it; the user's `generate` turns the brief into a generation node on the canvas, which the agent then draws like any other. The conversation goes on beside it: a fix about the idea updates the brief, a fix about the drawn image is a refine on the canvas. How the designer works and what the brief holds are in `ideation.md`.
+For a user who does not know yet what the image should be, a project thread works it out in conversation. The agent works as the designer with the user as the client: it analyzes the need, proposes ideas with reasons, recommends one, and develops the pick. Ideas are drafts on the canvas, drawn with the draft model, and the image's brief is a text node the agent writes and rewrites as the image takes shape (`node.py add <project> --request "<the brief of the image>" --thread <t>`, a new node whose parent is the last one each time it changes). When the image is concrete the agent proposes drawing it with a style; on the user's go (picking the brief and asking in the composer, or saying so in the thread) a generation node with the brief as its parent draws it like any other. The conversation goes on beside it: a fix about the idea is a new brief, a fix about the drawn image is a refine on the canvas. How the designer works and what the brief holds are in `ideation.md`.
 
 ## Surfaces
 
-- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: a card per node with its request and images, an edge from each parent's card to the node built on it, groups (frames) that move their nodes together, and the composer; beside it the brief, the styles, and the threads. A card shows what was asked and what came out, images or a text; selecting a node opens its inspector with how it was made: the images and texts it builds on, the agent's notes, the model and the style at its revision, the references used and left out, and the prompt. Reviews are the agent's own check and are not shown; what follows from them reaches the user as a redraw or a change to the style. The brief and each style have a page with the document and a box under it, where what the user writes opens a thread. A style's page shows the model it draws with and its latest revision, and tabs for its rules, its references (images with their annotations and the set check, and texts), and its history: every revision with what changed, why, where the reaction was, and the images drawn with it. A thread's page is the conversation. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
-- Conversation: the agent sends a numbered sheet (`sheet.py <thread | node>`), records the user's reply with `thread.py answer`, and adds nodes with `node.py add`.
+- Web: `open-package studio` serves the studio (`source/web/`) on `127.0.0.1:8770`. The home lists the projects. A project opens on its canvas: a card per node with its request and images, an edge from each parent's card to the node built on it, groups (frames) that move their nodes together, and the composer; beside it the brief, the styles, and the threads. A card shows what was asked and what came out, images or a text; selecting a node opens its inspector with how it was made: the images and texts it builds on, the agent's notes, the model and the style at its revision, the references used and left out, and the prompt. Reviews are the agent's own check and are not shown; what follows from them reaches the user as a redraw or a change to the style. The brief and each style have a page with the document and a box under it, where what the user writes opens a thread. A style's page shows the model it draws with and its latest revision, and tabs for its rules, its references (images with their annotations and the set check, and texts), and its history: every revision with what changed, why, where the reaction was, and the images drawn with it. A thread's page is the conversation: the agent's messages with the images and texts of the nodes they show, and the user's replies; an image the user attaches is an upload node of the thread. On the canvas a draft is marked as one, and a node made in a thread names it. Pages poll, so an open tab follows the records. The app bar shows whether an agent is attached (an agent looked for work in the last ten minutes).
+- Conversation: the agent sends a numbered sheet (`sheet.py <thread | node>`), records the user's reply with `thread.py answer` (an image the user sends is added first with `node.py add --upload --thread`, and the answer names it with `--node`), and adds nodes with `node.py add`.
 
 The server writes only records: projects, styles and the user's own changes to them (references, models, restoring a revision), nodes asked for (a tool node it runs itself), the canvas layout, threads and answers. What is written in words (the brief, a style's rules and prompting, a text a node asks for) the agent writes. Generation always goes through the agent.
 
@@ -141,9 +141,9 @@ The server writes only records: projects, styles and the user's own changes to t
 
 The web studio is the default surface. When the user starts, the agent starts `open-package studio`, gives its address, and works there until the user ends. The conversation surface is used when the user asks for it, or when the agent cannot keep a command running in the background; the agent says which surface it is using and why.
 
-On the web, what the agent publishes is its message. Everything the user is meant to read or answer goes into it: a thread round's note and its candidates' lines, a node's note and image lines, a revision's summary and reason. A user looking at the studio does not read the conversation, so the conversation gets one line saying what is up and where, and nothing the user has to answer:
+On the web, what the agent publishes is its message. Everything the user is meant to read or answer goes into it: a thread round's note and the lines of the nodes it shows, a node's note and image lines, a revision's summary and reason. A user looking at the studio does not read the conversation, so the conversation gets one line saying what is up and where, and nothing the user has to answer:
 
-- Asking for the yes to a paid draft model, or a question before any image can be drawn, is a thread round with the question as its note and no images.
+- Asking for the yes to a paid draft model, or a question before any image can be drawn, is a thread round with the question as its note and no nodes.
 - Proposing the next step (drawing from the brief, trying a new revision on the canvas, a reference to add) goes in the round or node that shows why.
 - When the user writes in the conversation while the studio is in use, the agent records it where it belongs (`thread.py answer`, `node.py add`) and answers there, so the page keeps the whole record. Questions that belong to no thread or node (which projects there are, what a model costs) are answered in the conversation.
 
@@ -169,15 +169,16 @@ open-package project new <project>
 open-package style new <project> <style>              # --from <style> to copy another project's style
 P=projects/<project>; S=$P/styles/<style>; T=$P/threads/<id>
 
-# the draft model for candidates (models.md): a free one, else the first listed candidate, after the user's yes
+# the draft model (models.md): a free one, else the first listed candidate, after the user's yes
 open-package models --free
 D=<draft model id>
 
-# a thread round: after editing $S/style.md, candidates from the draft model
-open-package generate $T --model $D --prompt-file /tmp/1.md --into c1
-open-package generate $T --model $D --prompt-file /tmp/2.md --into c2
-open-package thread publish "$(open-package thread next $T)" --note "<the style in plain words, what changed, the questions>" \
-  --describe "<reading 1>" --describe "<reading 2>"
+# a thread round: after editing $S/style.md, a draft on the canvas, then the round that shows it
+N=$(open-package node add <project> --draft $D --style <style> --request "<what the draft tests>" --thread <id>)
+open-package generate $N --prompt-file /tmp/1.md
+open-package generate $N --prompt-file /tmp/2.md
+open-package node publish $N --note "<what to compare>" --describe "<reading 1>" --describe "<reading 2>"
+open-package thread publish $T --note "<the style in plain words, what changed, the questions>" --node "$(basename $N)"
 open-package style revise $S --summary "<what changed>" --reason "<why, in the user's words>" --origin t3/002
 
 # references: annotate each image, then check the set
@@ -196,8 +197,8 @@ open-package node add <project> --tool cutout --parent $P/nodes/n3/<image>
 N=$(open-package node add <project> --request "<the user's words>")
 open-package node publish $N --text /tmp/palette.md --note "<what it wrote>"
 
-# ideation: $T/brief.md is written once the image has a shape; the user's generate turns it into a node
-open-package thread open $S ideation --message "<the user's first words>"
+# a project thread: the brief, or working out what to make, with drafts and texts made as nodes of the thread
+open-package thread open $P project --message "<the user's first words>"
 
 # the user's own changes, asked in conversation
 open-package style reference-add $S <image or text>
@@ -215,9 +216,10 @@ open-package style show $S --revision 3
 open-package sheet $T                                 # also a node
 open-package thread answer $T --comment "layers should look thicker"
 open-package thread answer $T --picked 2 --note "2=the shadow is softer" --note "3=too dark" --comment "closest"
-open-package thread answer $T --decision generate     # ideation: draw the brief
+U=$(open-package node add <project> --upload liked.png --thread <id>)   # an image the user sent
+open-package thread answer $T --comment "like this one" --node "$(basename $U)"
 open-package thread show $T
 open-package node show $N
 ```
 
-`generate.py` writes into the node or the thread's next round (a subfolder with `--into`) and records each call beside the images in `calls.jsonl`: the model, the revision, the request, the prompt, the references with their roles, the options, the cost. `--dry-run` prints the request body without sending it. Options a model does not accept are dropped and reported; what a model accepts is read from OpenRouter and cached in the workspace's `cache/` for a day.
+`generate.py` writes into the node, with the draft model for a draft and the model of the node's style at its revision otherwise, and records each call beside the images in `calls.jsonl`: the model, the revision, the request, the prompt, the references with their roles, the options, the cost. `--dry-run` prints the request body without sending it. Options a model does not accept are dropped and reported; what a model accepts is read from OpenRouter and cached in the workspace's `cache/` for a day.

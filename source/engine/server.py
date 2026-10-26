@@ -25,7 +25,7 @@ from catalog import catalog
 from node import Node, run_in_background, views
 from project import Project
 from style import Style
-from thread import Thread, open_ideation, open_project_thread, open_style_thread
+from thread import open_project_thread, open_style_thread
 from workspace import RecordError
 
 ENGINE = Path(__file__).resolve().parent
@@ -94,7 +94,7 @@ def style_detail(style):
     drawn = {}
     for node in reversed(style.project.nodes()):
         if node.style == style.name:
-            drawn.setdefault(node.revision, []).extend({"node": node.id, "path": image["path"]} for image in node.view()["images"])
+            drawn.setdefault(node.revision, []).extend({"node": node.id, "path": image["path"], "draft": node.draft} for image in node.view()["images"])
     return {
         **style_summary(style),
         "spec": style.spec(),
@@ -161,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200, revision_detail(self.style(query), int(query.get("revision", "0"))))
             if path == "/api/thread":
                 project = self.project(query)
-                return self.send_json(200, {**self.thread(project, query.get("thread")).view(), "agent": agent()})
+                return self.send_json(200, {**project.thread(query.get("thread", "")).view(), "agent": agent()})
             if path == "/api/archive":
                 return self.send_json(200, {"projects": [{"project": project.name, "nodes": [node for node in views(project) if node["images"]]} for project in Project.all()]})
             if path == "/api/catalog":
@@ -223,11 +223,10 @@ class Handler(BaseHTTPRequestHandler):
             self.node(project, body.get("node")).delete()
             return {"ok": True}
         if path == "/api/threads":
-            attachments = [self.upload(item) for item in body.get("attachments", [])]
+            uploads = [self.upload(item) for item in body.get("attachments", [])]
             if body.get("kind") == "project":
-                return {"thread": open_project_thread(project, message=body.get("message", ""), attachments=attachments, surface="web").id}
-            opener = open_ideation if body.get("kind") == "ideation" else open_style_thread
-            return {"thread": opener(project.style(body.get("style", "")), message=body.get("message", ""), attachments=attachments, surface="web").id}
+                return {"thread": open_project_thread(project, message=body.get("message", ""), uploads=uploads, surface="web").id}
+            return {"thread": open_style_thread(project.style(body.get("style", "")), message=body.get("message", ""), uploads=uploads, surface="web").id}
         if path.startswith("/api/threads/"):
             return self.thread_change(path, project, body)
         if path.startswith("/api/styles/"):
@@ -251,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def thread_change(self, path, project, body):
-        thread = self.thread(project, body.get("thread"))
+        thread = project.thread(body.get("thread", ""))
         if path == "/api/threads/rename":
             thread.rename(body.get("name", ""))
             return {"ok": True}
@@ -266,21 +265,15 @@ class Handler(BaseHTTPRequestHandler):
                 picked=[int(number) for number in body.get("picked", [])],
                 notes={int(number): text for number, text in body.get("notes", {}).items()},
                 comment=body.get("comment", ""),
-                decision=body.get("decision"),
+                nodes=body.get("nodes", []),
                 surface="web"
             )
-        if path == "/api/threads/attach":
-            name, content = self.upload(body)
-            return {"path": current.attach(name, content)}
-        if path == "/api/threads/detach":
-            current.detach(body.get("path", ""))
-            return {"ok": True}
         return None
 
     def add_node(self, project, body):
         kind = body.get("kind", "generation")
         attachments = [self.upload(item, text=kind == "upload") for item in body.get("attachments", [])]
-        node = Node.create(project, kind, body.get("request", ""), body.get("style"), body.get("revision"), body.get("parents", []), attachments, body.get("tool"), surface="web")
+        node = Node.create(project, kind, body.get("request", ""), body.get("style"), body.get("revision"), body.get("parents", []), attachments, body.get("tool"), thread=body.get("thread"), surface="web")
         if kind == "tool":
             run_in_background(node)
         return {"node": node.id}
@@ -342,11 +335,6 @@ class Handler(BaseHTTPRequestHandler):
         if not identifier or "/" in identifier or identifier.startswith("."):
             raise RecordError("no such node")
         return Node.at(workspace.relative(project.path / "nodes" / identifier))
-
-    def thread(self, project, identifier):
-        if not identifier or "/" in identifier or identifier.startswith("."):
-            raise RecordError("no such thread")
-        return Thread.at(workspace.relative(project.path / "threads" / identifier))
 
     def servable(self, path):
         return path.is_file() and path.suffix.lower() in workspace.IMAGE_SUFFIXES and workspace.inside(path, workspace.PROJECTS)

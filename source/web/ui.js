@@ -197,8 +197,8 @@ function composer({ value = "", placeholder = "", sendTitle, onInput = null, onS
 // ---------- labels ----------
 
 // tone: "" (neutral), accent, success, warning (behind or in conflict), danger. dot: null, "static", "live".
-function pill(text, { tone = "", dot = null, small = false } = {}) {
-  return h("span", { class: ["pill", tone, small && "small"].filter(Boolean).join(" ") }, [dot ? h("span", { class: `dot${dot === "live" ? " live" : ""}` }) : null, text]);
+function pill(text, { tone = "", dot = null, small = false, title = null } = {}) {
+  return h("span", { class: ["pill", tone, small && "small"].filter(Boolean).join(" "), title }, [dot ? h("span", { class: `dot${dot === "live" ? " live" : ""}` }) : null, text]);
 }
 
 function field(label, value, { strong = false, mono = false, grows = false } = {}) {

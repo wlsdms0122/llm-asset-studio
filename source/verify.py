@@ -2,10 +2,10 @@
 """Run the engine and the studio server end to end in a throwaway workspace, generating nothing and spending nothing.
 
 Checks that every text on screen has its Korean, then makes a project and a style through its whole life (the style
-thread, revisions with their reasons, drawing from the words alone, image and text references picked from the canvas
-and annotated, a written node, a refine at a chosen revision, a revision restored), runs a tool node, turns an
-ideation brief into a node, writes a project's brief in its thread, renames, copies, and deletes, asks the server for
-every page's state and writes through it, and stores a key. Image generation is stood in for by writing images and their call records
+thread with its drafts and the image the user sends as nodes, revisions with their reasons, drawing from the words
+alone, image and text references picked from the canvas and annotated, a written node, a refine at a chosen revision,
+a revision restored), runs a tool node, writes a project's brief and a text in its thread, renames, copies, and
+deletes, asks the server for every page's state and writes through it, and stores a key. Image generation is stood in for by writing images and their call records
 where generate.py would. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
 
@@ -69,14 +69,12 @@ def out(workspace, *arguments):
     return engine(workspace, *arguments).stdout.strip()
 
 
-def draw(workspace, folder, colors, request="a request", model="test/model", into=""):
-    """What generate.py leaves: images in the folder and a call record beside them."""
+def draw(workspace, folder, colors, request="a request", model="test/model"):
+    """What generate.py leaves: images in the node and a call record beside them."""
     folder = workspace / folder
-    target = folder / into
-    target.mkdir(parents=True, exist_ok=True)
     outputs = []
     for color in colors:
-        path = target / f"{len(list(target.glob('*.png')))}-{'-'.join(map(str, color))}.png"
+        path = folder / f"{len(list(folder.glob('*.png')))}-{'-'.join(map(str, color))}.png"
         png(path, color)
         outputs.append(path.relative_to(folder).as_posix())
     call = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "model": model, "revision": None, "request": request, "prompt": f"prompt for {request}", "references": [], "status": "ok", "outputs": outputs, "cost": 0.01 * len(outputs)}
@@ -104,11 +102,6 @@ def lifecycle(workspace):
     check("the agent's edits become a revision", out(workspace, "style.py", "revise", style_path, "--summary", "first words", "--reason", "from the thread", "--origin", "t1/001") == "1")
     first = json.loads((style / "revisions.jsonl").read_text().splitlines()[0])
     check("a revision keeps why it was made and where", first["reason"] == "from the thread" and first["origin"] == "t1/001" and first["source"] == "agent")
-    candidates = draw(workspace, f"{thread_path}/002", [(200, 40, 40), (40, 40, 200)], model="draft/model")
-    engine(workspace, "thread.py", "publish", f"{thread_path}/002", "--note", "which?", "--describe", "red", "--describe", "blue")
-    shown = json.loads(out(workspace, "thread.py", "show", thread_path))
-    check("a round shows its candidates with the model that drew them", [item["model"] for item in shown["rounds"][-1]["candidates"]] == ["draft/model", "draft/model"])
-
     node = out(workspace, "node.py", "add", "demo", "--style", "icon", "--request", "a cup")
     check("a style draws from its words alone, at its latest revision", json.loads((workspace / node / "node.json").read_text())["revision"] == 1)
     check("watch hands over a generation node", node in out(workspace, "watch.py", "--once").split())
@@ -127,6 +120,46 @@ def lifecycle(workspace):
         engine(workspace, "style.py", "annotate", f"{style_path}/references/{name}", "--role", "style", "--shows", "a cup", "--take", "the rendering", "--ignore", "the subject")
     engine(workspace, "style.py", "set-check", style_path)
     check("annotated and checked references need nothing", style_path not in out(workspace, "watch.py", "--once").split())
+
+    draft = out(workspace, "node.py", "add", "demo", "--draft", "draft/model", "--style", "icon", "--request", "a mug: no outline or a thin one", "--thread", "t1")
+    record = json.loads((workspace / draft / "node.json").read_text())
+    check("a draft names its draft model, the style's revision, and its thread", record["draft"] == "draft/model" and record["revision"] == len((style / "revisions.jsonl").read_text().splitlines()) and record["thread"] == "t1")
+    sys.path.insert(0, str(ENGINE))
+    import workspace as home
+    home.HOME, home.PROJECTS, home.OBJECTS = workspace, workspace / "projects", workspace / "objects"
+    from generate import Target
+    from workspace import RecordError
+    check("a draft draws with its draft model", Target(draft).model == "draft/model")
+    check("a round shows only nodes that are made", engine(workspace, "thread.py", "publish", thread_path, "--node", Path(draft).name, ok=False).returncode != 0)
+    check("a draft at a revision that does not exist is refused", engine(workspace, "node.py", "add", "demo", "--draft", "draft/model", "--style", "icon", "--revision", "99", "--request", "x", ok=False).returncode != 0)
+    outside = engine(workspace, "node.py", "add", "demo", "--style", "icon", "--request", "x", "--parent", "nodes/n1/a.png", ok=False)
+    check("a parent given outside the project is refused in words", outside.returncode != 0 and "Traceback" not in outside.stderr)
+    draw(workspace, draft, [(200, 40, 40), (40, 40, 200)], model="draft/model")
+    engine(workspace, "node.py", "publish", draft, "--note", "two readings", "--describe", "no outline", "--describe", "a thin outline")
+    png(workspace / "liked.png", (90, 160, 90))
+    sent = out(workspace, "node.py", "add", "demo", "--upload", str(workspace / "liked.png"), "--thread", "t1")
+    check("a round shows only nodes of its project", engine(workspace, "thread.py", "publish", thread_path, "--node", "n99", ok=False).returncode != 0)
+    engine(workspace, "thread.py", "publish", thread_path, "--note", "which?", "--node", Path(draft).name)
+    shown = json.loads(out(workspace, "thread.py", "show", thread_path))["rounds"][-1]
+    check("a round shows the images of its nodes with the model and the line for each", [(item["model"], item["description"]) for item in shown["candidates"]] == [("draft/model", "no outline"), ("draft/model", "a thin outline")] and shown["nodes"][0]["draft"] == "draft/model")
+    engine(workspace, "thread.py", "answer", thread_path, "--picked", "2", "--note", "1=too plain", "--comment", "the outline, like this", "--node", Path(sent).name)
+    shown = json.loads(out(workspace, "thread.py", "show", thread_path))["rounds"][-1]
+    check("an answer picks and notes the images by number and sends a node", [item["picked"] for item in shown["candidates"]] == [False, True] and shown["candidates"][0]["note"] == "too plain" and [item["id"] for item in shown["sent"]] == [Path(sent).name])
+    second = out(workspace, "node.py", "add", "demo", "--draft", "draft/model", "--style", "icon", "--request", "two line weights", "--thread", "t1")
+    kept = draw(workspace, second, [(30, 30, 30)], model="draft/model")
+    engine(workspace, "node.py", "publish", second)
+    engine(workspace, "thread.py", "publish", thread_path, "--note", "and these?", "--node", Path(draft).name, "--node", Path(second).name)
+    engine(workspace, "node.py", "delete", draft)
+    shown = json.loads(out(workspace, "thread.py", "show", thread_path))["rounds"][-1]
+    check("a deleted node's images are gone from a round and the rest keep their numbers", [(item["number"], item["gone"]) for item in shown["candidates"]] == [(1, True), (2, True), (3, False)])
+    picked = json.loads(out(workspace, "thread.py", "answer", thread_path, "--picked", "3"))
+    check("a pick names the image shown under that number", picked["picked"] == [f"nodes/{Path(second).name}/{Path(kept[0]).name}"])
+    rough = out(workspace, "style.py", "new", "demo", "rough").splitlines()[0]
+    early = out(workspace, "node.py", "add", "demo", "--draft", "draft/model", "--style", "rough", "--request", "a mug")
+    check("a draft tries a style's words before the style can draw", json.loads((workspace / early / "node.json").read_text())["revision"] == 1)
+    check("only a generation is a draft", engine(workspace, "node.py", "add", "demo", "--tool", "cutout", "--parent", drawn[0], "--draft", "draft/model", ok=False).returncode != 0)
+    engine(workspace, "node.py", "delete", early)
+    engine(workspace, "style.py", "delete", rough)
 
     written = out(workspace, "node.py", "add", "demo", "--request", "the app's palette")
     check("a request with no style is written as a text, and watch hands it over", json.loads(out(workspace, "node.py", "show", written))["output"] == "text" and written in out(workspace, "watch.py", "--once").split())
@@ -155,11 +188,6 @@ def lifecycle(workspace):
     (style / "style.json").write_text(json.dumps({"model": "other/model"}))
     (style / "prompting/other--model.md").write_text("# icon on other\n")
     engine(workspace, "style.py", "revise", style_path, "--summary", "other model")
-    sys.path.insert(0, str(ENGINE))
-    import workspace as home
-    home.HOME, home.PROJECTS, home.OBJECTS = workspace, workspace / "projects", workspace / "objects"
-    from generate import Target
-    from workspace import RecordError
     check("a node draws with the model of its revision", Target(refine).model == "test/model")
     try:
         Target(written)
@@ -190,17 +218,6 @@ def lifecycle(workspace):
     else:
         print("skip cutout, which needs macOS and Swift")
 
-    talk = out(workspace, "thread.py", "open", style_path, "ideation", "--message", "an icon, no idea")
-    check("ideation starts with the user's words", talk in out(workspace, "watch.py", "--once").split())
-    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", talk), "--note", "a sun?")
-    check("drawing waits for a brief", engine(workspace, "thread.py", "answer", talk, "--decision", "generate", ok=False).returncode != 0)
-    engine(workspace, "thread.py", "answer", talk, "--comment", "the sun")
-    (workspace / talk / "brief.md").write_text("# A sun icon\n\nCentered.\n")
-    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", talk), "--note", "brief written")
-    answer = json.loads(out(workspace, "thread.py", "answer", talk, "--decision", "generate"))
-    made = json.loads(out(workspace, "node.py", "show", f"projects/demo/nodes/{answer['node']}"))
-    check("an ideation brief becomes a generation node at the latest revision", made["request"].startswith("A sun icon") and made["thread"] == Path(talk).name and made["revision"] == len((style / "revisions.jsonl").read_text().splitlines()))
-
     renamed = out(workspace, "style.py", "rename", style_path, "glyph")
     check("renaming a style rewrites the records that name it", renamed == "projects/demo/styles/glyph" and json.loads((workspace / node / "node.json").read_text())["style"] == "glyph" and json.loads((workspace / thread_path / "thread.json").read_text())["style"] == "glyph")
     out(workspace, "project.py", "new", "other")
@@ -212,9 +229,13 @@ def lifecycle(workspace):
     brief = out(workspace, "thread.py", "open", "projects/demo", "project", "--message", "icons for a demo app")
     check("a project thread starts with the user's words", brief in out(workspace, "watch.py", "--once").split())
     (workspace / "projects/demo/project.md").write_text("# demo\n\nIcons for a demo app.\n")
-    engine(workspace, "thread.py", "publish", out(workspace, "thread.py", "next", brief), "--note", "brief written")
+    idea = out(workspace, "node.py", "add", "demo", "--request", "a brief for a sun icon", "--thread", Path(brief).name)
+    (workspace / "idea.md").write_text("# A sun icon\n\nCentered.\n")
+    engine(workspace, "node.py", "publish", idea, "--text", str(workspace / "idea.md"))
+    engine(workspace, "thread.py", "publish", brief, "--note", "brief written, and the idea as a text", "--node", Path(idea).name)
     shown = json.loads(out(workspace, "thread.py", "show", brief))
     check("a project thread shows the brief the agent wrote", shown["style"] is None and shown["rounds"][-1]["brief"].startswith("# demo") and shown["rounds"][-1]["spec"] is None)
+    check("a round shows a text it points to", shown["rounds"][-1]["nodes"][0]["text"].startswith("# A sun icon") and shown["rounds"][-1]["candidates"] == [])
     return node
 
 
@@ -280,8 +301,9 @@ def server(workspace, node):
         status, uploaded = post("/api/nodes", {"project": "demo", "kind": "upload", "attachments": [{"name": "a.png", "data": image}]})
         check("an upload is a node with its image", status == 200 and state("/api/project?project=demo")["nodes"][-1]["status"] == "done")
         check("saves the canvas", post("/api/canvas", {"project": "demo", "positions": {"n1": [10, 20], "zz": [0, 0]}})[1]["positions"] == {"n1": [10.0, 20.0]})
-        frames = post("/api/canvas", {"project": "demo", "frames": [{"title": " icons ", "nodes": ["n1", "n2", "zz"]}, {"title": "again", "nodes": ["n1"]}]})[1]["frames"]
-        check("a node is in one frame at most and an empty frame is gone", frames == [{"title": "icons", "nodes": ["n1", "n2"]}])
+        other = next(item["id"] for item in state("/api/project?project=demo")["nodes"] if item["id"] != "n1")
+        frames = post("/api/canvas", {"project": "demo", "frames": [{"title": " icons ", "nodes": ["n1", other, "zz"]}, {"title": "again", "nodes": ["n1"]}]})[1]["frames"]
+        check("a node is in one frame at most and an empty frame is gone", frames == [{"title": "icons", "nodes": ["n1", other]}])
         canvas = json.loads((workspace / "projects/demo/canvas.json").read_text())
         (workspace / "projects/demo/canvas.json").write_text(json.dumps({**canvas, "frames": [{"title": "icons", "nodes": ["n1", "gone"]}]}))
         check("a canvas read leaves out nodes that are gone", state("/api/project?project=demo")["canvas"]["frames"] == [{"title": "icons", "nodes": ["n1"]}])
@@ -306,6 +328,16 @@ def server(workspace, node):
         check("an attachment to a request is an image", post("/api/nodes", {"project": "demo", "style": "glyph", "request": "x", "attachments": [{"name": "a.md", "data": text}]})[0] == 400)
         status, created = post("/api/styles", {"project": "demo", "name": "새-스타일"})
         check("creates a style named in Korean with its thread", status == 200 and created["thread"])
+        status, sent = post("/api/nodes", {"project": "demo", "kind": "upload", "thread": created["thread"], "attachments": [{"name": "like.png", "data": image}]})
+        status, answered = post("/api/threads/answer", {"project": "demo", "thread": created["thread"], "round": 1, "comment": "like this", "nodes": [sent["node"]]})
+        talk = state(f"/api/thread?project=demo&thread={created['thread']}")
+        check("an image sent in a thread is an upload node of the thread", status == 200 and [item["id"] for item in talk["rounds"][0]["sent"]] == [sent["node"]] and talk["rounds"][0]["sent"][0]["thread"] == created["thread"])
+        status, opened = post("/api/threads", {"project": "demo", "style": "glyph", "message": "like this one", "attachments": [{"name": "b.png", "data": image}]})
+        first = state(f"/api/thread?project=demo&thread={opened['thread']}")["rounds"][0]["sent"]
+        check("images sent with a thread's first words are nodes", status == 200 and len(first) == 1)
+        post("/api/threads/delete", {"project": "demo", "thread": opened["thread"]})
+        left = next(item for item in state("/api/project?project=demo")["nodes"] if item["id"] == first[0]["id"])
+        check("a node made in a deleted thread stays and names no thread", left["thread"] is None)
         check("a name with capitals is refused", post("/api/projects/rename", {"project": "demo", "name": "Demo"})[0] == 400)
         check("renames a project", post("/api/projects/rename", {"project": "other", "name": "다른"})[0] == 200 and get(f"/api/project?project={quote('다른')}")[0] == 200)
         check("deletes a project", post("/api/projects/delete", {"project": "다른"})[0] == 200 and not (workspace / "projects/다른").exists())

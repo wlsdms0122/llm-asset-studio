@@ -16,7 +16,7 @@ const inProject = (project, path) => `projects/${project}/${path}`;
 const objectUrl = name => `/object/${name}`;
 const TOOL_NAMES = { cutout: t("Background removal") };
 const KIND_NAMES = { generation: t("Generation"), tool: t("Tool"), upload: t("Upload") };
-const THREAD_NAMES = { project: t("Brief thread"), style: t("Style thread"), ideation: t("Ideation") };
+const THREAD_NAMES = { project: t("Project thread"), style: t("Style thread") };
 
 function when(time) {
   if (!time) return "";
@@ -510,6 +510,8 @@ page("thread", {
     const signature = signatureOf(next);
     if (signature === conversation.signature && $("thread-page")) return;
     conversation.signature = signature;
+    // A candidate whose node was deleted from the canvas is gone; the others keep the numbers they were shown with.
+    for (const round of next.rounds) round.candidates = round.candidates.filter(candidate => !candidate.gone);
     conversation.data = next;
     renderThread(at);
   }
@@ -523,7 +525,7 @@ function renderThread(at) {
   const data = conversation.data;
   const open = openRound();
   const key = open ? `${at.project}|${at.thread}|${open.round}` : null;
-  if (!conversation.draft || conversation.draft.key !== key) conversation.draft = { key, picked: new Set(), notes: {}, comment: "" };
+  if (!conversation.draft || conversation.draft.key !== key) conversation.draft = { key, picked: new Set(), notes: {}, comment: "", uploads: [] };
   document.title = `${threadTitle(data)} · Asset Studio`;
 
   if (!$("thread-page")) {
@@ -531,7 +533,6 @@ function renderThread(at) {
       h("aside", { class: "panel" }, [
         h("div", { class: "panel-head", id: "thread-head" }),
         h("div", { class: "panel-doc", id: "thread-doc" }),
-        h("div", { class: "panel-actions", id: "thread-actions" }),
         panelResizer()
       ]),
       h("div", { class: "stage-column" }, [
@@ -561,7 +562,6 @@ const toBottom = () => { const stage = $("thread-stage"); stage.scrollTop = stag
 
 function renderThreadPanel(at, data) {
   const latest = latestRound();
-  const ideation = data.kind === "ideation";
   fill($("thread-head"), ...panelHead({
     back: [at.project, hashes.project(at.project)],
     title: threadTitle(data),
@@ -571,21 +571,15 @@ function renderThreadPanel(at, data) {
       { label: t("Delete"), danger: true, onClick: () => deleteThread(at) }
     ]
   }));
-  // A style thread shows style.md as the agent showed it in the latest round; the project and ideation threads show
-  // their brief as it is now.
+  // A style thread shows style.md as the agent showed it in the latest round; a project thread shows the brief as it
+  // is now.
   const style = data.kind === "style";
   const text = style ? latest && latest.spec : data.brief;
-  const empty = { project: t("The agent writes the project's brief here as you talk."), style: t("The agent writes the style here as you talk."), ideation: t("The agent writes the brief here as the image takes shape.") };
+  const empty = { project: t("The agent writes the project's brief here as you talk."), style: t("The agent writes the style here as you talk.") };
   fill($("thread-doc"),
     sectionTitle(style ? t("Style") : t("Brief"), style && latest ? t("As shown in round {round}", { round: latest.round }) : null),
     text && text.trim() ? markdownView(text) : h("p", { class: "muted", text: empty[data.kind] })
   );
-  const open = openRound();
-  fill($("thread-actions"), ideation ? button(t("Draw it"), {
-    variant: "success", grow: true, iconName: "check", disabled: !data.brief || !open,
-    title: !data.brief ? t("Waits for the brief") : !open ? t("Waits for the agent's reply") : t("Turns the brief into a generation on the canvas"),
-    onClick: event => answer(at, "generate", event.currentTarget)
-  }) : null);
 }
 
 async function renameThread(at, data) {
@@ -599,7 +593,7 @@ async function renameThread(at, data) {
 }
 
 async function deleteThread(at) {
-  if (!await confirmDelete(t("Delete this thread"), t("The conversation and its images are deleted. Images it put on the canvas stay."))) return;
+  if (!await confirmDelete(t("Delete this thread"), t("The conversation is deleted. What it made stays on the canvas."))) return;
   try { await api("/api/threads/delete", { project: at.project, thread: at.thread }); location.hash = hashes.project(at.project); }
   catch (error) { toast(error.message, "error"); }
 }
@@ -624,15 +618,20 @@ function candidateItems(at, candidates) {
   }));
 }
 
+// A text a round shows or the user sent: the start of it, read whole on the canvas.
+const textCard = (at, node) => h("a", { class: "thread-text", href: hashes.project(at.project, node.id), title: t("{node} on the canvas", { node: node.id }) }, [markdownView(node.text)]);
+
 function renderConversation(at, data) {
   const nodes = [];
   const open = openRound();
   for (const round of data.rounds) {
     const items = candidateItems(at, round.candidates);
-    const links = round.nodes.map(id => linkButton(t("{node} on the canvas", { node: id }), hashes.project(at.project, id), { iconName: "open" }));
+    const texts = round.nodes.filter(node => node.text != null);
+    const links = round.nodes.map(node => linkButton(t("{node} on the canvas", { node: node.id }), hashes.project(at.project, node.id), { iconName: "open" }));
     const agentSays = [
       round.note ? h("div", { class: "bubble", text: round.note }) : null,
       round !== open && round.candidates.length ? h("div", { class: "thumbs" }, round.candidates.map((candidate, index) => thumb(inProject(at.project, candidate.path), { picked: candidate.picked, badge: pad(candidate.number), title: candidate.description || t("Enlarge"), onClick: () => openLightbox(items, index) }))) : null,
+      ...texts.map(node => textCard(at, node)),
       links.length ? h("div", { class: "message-links" }, links) : null
     ];
     if (agentSays.some(Boolean)) nodes.push(messageNode("agent", agentSays, `agent|${round.round}`));
@@ -642,19 +641,18 @@ function renderConversation(at, data) {
   const latest = latestRound();
   if (!latest) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), t("Getting ready")])], "waiting|0"));
   else if (latest.feedback) nodes.push(messageNode("agent", [agentAttached()
-    ? h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), latest.feedback.decision === "generate" ? t("Drawing it on the canvas") : t("Reading your answer")])
+    ? h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), t("Reading your answer")])
     : h("div", { class: "bubble working" }, [t("No agent is attached, so this waits. Start one with open-package watch.")])], `waiting|${latest.round}`));
   fill($("thread-inner"), h("div", { class: "thread" }, nodes));
   conversation.primed = true;
 }
 
-// What the user answered: the reply, each picked or noted image with its number, the attachments, and a brief sent to the canvas.
+// What the user answered: the reply, each picked or noted image with its number, and what they sent, which is on the canvas.
 function userMessage(at, round, items) {
   const feedback = round.feedback;
   const marked = round.candidates.map((candidate, index) => ({ candidate, index })).filter(({ candidate }) => candidate.picked || candidate.note);
-  const attachments = feedback.attachments.map(path => ({ path: inProject(at.project, path), info: [] }));
+  const sent = round.sent.flatMap(node => node.images.map(image => ({ path: inProject(at.project, image.path), name: `${at.project}-${fileName(image.path)}`, add: () => addToReferences(at.project, image.path), info: [] })));
   return messageNode("user", [
-    feedback.decision === "generate" ? h("div", { class: "bubble" }, [t("Draw it")]) : null,
     feedback.comment ? h("div", { class: "bubble", text: feedback.comment }) : null,
     marked.length ? h("div", { class: "marks" }, marked.map(({ candidate, index }) => h("div", { class: "mark" }, [
       thumb(inProject(at.project, candidate.path), { small: true, picked: candidate.picked, onClick: () => openLightbox(items, index) }),
@@ -663,8 +661,8 @@ function userMessage(at, round, items) {
         candidate.note ? h("span", { class: "mark-note", text: candidate.note }) : null
       ])
     ]))) : null,
-    attachments.length ? h("div", { class: "thumbs" }, attachments.map((item, index) => thumb(item.path, { onClick: () => openLightbox(attachments, index) }))) : null,
-    feedback.node ? linkButton(t("{node} on the canvas", { node: feedback.node }), hashes.project(at.project, feedback.node), { iconName: "open" }) : null
+    sent.length ? h("div", { class: "thumbs" }, sent.map((item, index) => thumb(item.path, { onClick: () => openLightbox(sent, index) }))) : null,
+    ...round.sent.filter(node => node.text != null).map(node => textCard(at, node))
   ], `user|${round.round}`);
 }
 
@@ -703,7 +701,8 @@ function togglePick(at, number) {
   syncAnswer(at);
 }
 
-// The composer for the open round: the reply, the picked candidates with their numbers, and the attachments.
+// The composer for the open round: the reply, the picked candidates with their numbers, and the images to send, each
+// already an upload node of the thread.
 function renderThreadDock(at) {
   const open = openRound();
   if (!open) { conversation.composer = null; return fill($("thread-dock")); }
@@ -711,10 +710,10 @@ function renderThreadDock(at) {
   if (!conversation.composer || conversation.composer.key !== draft.key) {
     conversation.composer = composer({
       value: draft.comment,
-      placeholder: { project: t("e.g. Icons for a budgeting app for people in their twenties"), style: t("e.g. A little softer and simpler"), ideation: t("e.g. An app icon, but I don't know what to draw yet") }[conversation.data.kind],
+      placeholder: { project: t("e.g. An app icon, but I don't know what to draw yet"), style: t("e.g. A little softer and simpler") }[conversation.data.kind],
       sendTitle: `${t("Send")} (⌘↵)`,
       onInput: value => { draft.comment = value; syncAnswer(at); },
-      onSend: event => answer(at, null, event.currentTarget),
+      onSend: event => answer(at, event.currentTarget),
       attach: uploadButton(t("Attach images"), files => attach(at, files), { variant: "ghost" })
     });
     conversation.composer.key = draft.key;
@@ -730,29 +729,37 @@ function syncAnswer(at) {
   const draft = conversation.draft;
   const items = candidateItems(at, open.candidates);
   box.setImages([
-    ...open.candidates.filter(candidate => draft.picked.has(candidate.number)).map(candidate => ({
+    ...open.candidates.map((candidate, index) => ({ candidate, index })).filter(({ candidate }) => draft.picked.has(candidate.number)).map(({ candidate, index }) => ({
       key: `pick|${candidate.path}`,
-      node: thumb(inProject(at.project, candidate.path), { picked: true, badge: pad(candidate.number), title: t("No. {number}", { number: pad(candidate.number) }), remove: () => togglePick(at, candidate.number), onClick: () => openLightbox(items, candidate.number - 1) })
+      node: thumb(inProject(at.project, candidate.path), { picked: true, badge: pad(candidate.number), title: t("No. {number}", { number: pad(candidate.number) }), remove: () => togglePick(at, candidate.number), onClick: () => openLightbox(items, index) })
     })),
-    ...open.attachments.map(path => ({ key: `attachment|${path}`, node: thumb(inProject(at.project, path), { remove: () => detach(at, path) }) }))
+    ...draft.uploads.map(item => ({ key: `upload|${item.node}`, node: thumb(item.name, { src: item.url, title: item.name, remove: () => detach(at, item) }) }))
   ]);
-  box.send.disabled = conversation.sending || (!draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !open.attachments.length);
+  box.send.disabled = conversation.sending || (!draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !draft.uploads.length);
 }
 
+// An image attached to the answer is an upload node of the thread at once, so it is on the canvas like anything else.
 async function attach(at, files) {
+  const draft = conversation.draft;
   for (const file of files) {
-    try { await api("/api/threads/attach", { project: at.project, thread: at.thread, name: file.name, data: await readFile(file) }); }
-    catch (error) { toast(error.message, "error"); }
+    try {
+      const made = await api("/api/nodes", { project: at.project, kind: "upload", thread: at.thread, attachments: [{ name: file.name, data: await readFile(file) }] });
+      draft.uploads.push({ node: made.node, name: file.name, url: URL.createObjectURL(file) });
+    } catch (error) { toast(error.message, "error"); }
   }
-  await load();
+  syncAnswer(at);
 }
 
-async function detach(at, path) {
-  try { await api("/api/threads/detach", { project: at.project, thread: at.thread, path }); await load(); }
-  catch { toast(t("Could not remove the image. Reload and try again."), "error"); }
+async function detach(at, item) {
+  try {
+    await api("/api/nodes/delete", { project: at.project, node: item.node });
+    URL.revokeObjectURL(item.url);
+    conversation.draft.uploads = conversation.draft.uploads.filter(each => each !== item);
+    syncAnswer(at);
+  } catch { toast(t("Could not remove the image. Reload and try again."), "error"); }
 }
 
-async function answer(at, decision, trigger) {
+async function answer(at, trigger) {
   const open = openRound();
   if (!open || conversation.sending) return;
   const draft = conversation.draft;
@@ -760,10 +767,10 @@ async function answer(at, decision, trigger) {
   if (trigger) trigger.disabled = true;
   try {
     const feedback = await api("/api/threads/answer", {
-      project: at.project, thread: at.thread, round: open.round, decision,
-      picked: [...draft.picked], notes: draft.notes, comment: draft.comment
+      project: at.project, thread: at.thread, round: open.round,
+      picked: [...draft.picked], notes: draft.notes, comment: draft.comment, nodes: draft.uploads.map(item => item.node)
     });
-    if (feedback.node) toast(t("Added {node} to the canvas", { node: feedback.node }));
+    draft.uploads.forEach(item => URL.revokeObjectURL(item.url));
     conversation.sending = false;
     await load();
   } catch (error) {

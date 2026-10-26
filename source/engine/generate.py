@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Generate images through the OpenRouter Images API into a node or a thread's next round, and record every call next
-to the images it made (calls.jsonl).
+"""Generate images through the OpenRouter Images API into a node, and record every call next to the images it made
+(calls.jsonl).
 
 The prompt is always written by the agent (--prompt or --prompt-file), from style.md and the prompting file at the
 node's revision, and document/prompting.md. References are chosen per generation (document/workflow.md) and attached
 in the order given (--ref), each recorded with its role and its object, so the record keeps naming the image after
 the style's references change.
 
-  node        projects/<p>/nodes/<id>: draws with the model of the node's style at the node's revision
-  thread      projects/<p>/threads/<id>: draws the candidates of the next round; give the draft model with --model
+The node says what draws it: a draft its draft model, any other node the model of its style at its revision.
 
 The API key is the workspace's (see workspace.py).
 """
@@ -34,25 +33,15 @@ API = "https://openrouter.ai/api/v1"
 
 
 class Target:
-    """Where images go and what draws them, read from the folder given."""
+    """The node images go into and what draws them."""
 
     def __init__(self, path):
         from node import Node
-        from thread import Thread
-        directory = workspace.resolve(path)
-        parts = workspace.relative(directory).split("/")
-        if len(parts) == 4 and parts[2] == "nodes":
-            node = Node.at(path)
-            if node.output != "image" or node.kind != "generation" or node.result() is not None:
-                raise RecordError(f"{node.id} is not waiting for images")
-            self.project, self.directory, self.revision = node.project, node.directory, node.revision
-            self.model = node.project.style(node.style).snapshot(self.revision).config()["model"]
-        elif len(parts) == 4 and parts[2] == "threads":
-            thread = Thread.at(path)
-            self.project, self.directory = thread.project, thread.next_round()
-            self.model, self.revision = None, None
-        else:
-            raise RecordError(f"{path} is not a node or a thread")
+        node = Node.at(path)
+        if node.output != "image" or node.kind != "generation" or node.result() is not None:
+            raise RecordError(f"{node.id} is not waiting for images")
+        self.project, self.directory, self.revision = node.project, node.directory, node.revision
+        self.model = node.draft or node.project.style(node.style).snapshot(self.revision).config()["model"]
 
 
 def main():
@@ -60,16 +49,13 @@ def main():
     workspace.enter()
     try:
         target = Target(arguments.target)
-        model = arguments.model or target.model
-        if not model:
-            raise RecordError("give --model: a thread's candidates come from the draft model")
+        model = target.model
         references = [reference(target.project, item) for item in arguments.ref]
     except RecordError as error:
         sys.exit(str(error))
     prompt = read_prompt(arguments)
     capability = Capability(model)
     failed = False
-    output = target.directory / (arguments.into or "")
 
     for index, batch in enumerate(capability.batches(arguments.n or 1)):
         body, dropped = capability.request_body(
@@ -92,7 +78,7 @@ def main():
             continue
         if not target.directory.is_dir():
             sys.exit(f"{workspace.relative(target.directory)} was deleted; stopped before drawing more")
-        failed |= not generate(target, arguments, model, prompt, references, body, dropped, output)
+        failed |= not generate(target, arguments, model, prompt, references, body, dropped)
 
     if failed:
         sys.exit(1)
@@ -116,8 +102,7 @@ def reference(project, item):
     }
 
 
-def generate(target, arguments, model, prompt, references, body, dropped, output):
-    output.mkdir(parents=True, exist_ok=True)
+def generate(target, arguments, model, prompt, references, body, dropped):
     (target.directory / ".drawing").touch()
     workspace.heartbeat()
     started = time.time()
@@ -136,7 +121,7 @@ def generate(target, arguments, model, prompt, references, body, dropped, output
         entry["cost"] = response.get("usage", {}).get("cost")
         if not target.directory.is_dir():
             raise RequestError(f"{workspace.relative(target.directory)} was deleted while drawing; the images were not kept")
-        files = save_images(response.get("data", []), output, model)
+        files = save_images(response.get("data", []), target.directory, model)
         entry.update({
             "status": "ok",
             "outputs": [path.relative_to(target.directory).as_posix() for path in files],
@@ -153,13 +138,11 @@ def generate(target, arguments, model, prompt, references, body, dropped, output
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("target", help="a node or a thread folder")
+    parser.add_argument("target", help="a node folder, projects/<p>/nodes/<id>")
     parser.add_argument("--prompt")
     parser.add_argument("--prompt-file")
-    parser.add_argument("--model", help="OpenRouter model id; defaults to the model of the node's style at its revision")
     parser.add_argument("--ref", action="append", default=[], help="[role=]image to attach, in order, repeatable: a style reference, a subject, an attachment, a parent image; role is style, subject, or composition")
     parser.add_argument("--request", help="the user's words, before the agent turned them into the prompt")
-    parser.add_argument("--into", help="a subfolder for these images, to keep candidates apart")
     parser.add_argument("--n", type=int, help="images wanted; split into as many calls as the model needs")
     parser.add_argument("--aspect-ratio")
     parser.add_argument("--resolution")

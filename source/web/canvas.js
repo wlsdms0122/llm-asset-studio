@@ -157,14 +157,14 @@ function renderPanel() {
     }))) : h("p", { class: "muted panel-hint", text: t("A style is how every image in it looks. Make one to start drawing.") }),
     h("div", { class: "row" }, [button(t("New style"), { small: true, iconName: "plus", onClick: newStyle })]),
 
-    sectionTitle(t("Threads"), drawableStyles().length ? button(t("New ideation"), { small: true, variant: "ghost", iconName: "plus", onClick: newIdeation }) : null),
+    sectionTitle(t("Threads"), button(t("New thread"), { small: true, variant: "ghost", iconName: "plus", onClick: newThread })),
     threads.length ? rowList(threads.map(thread => listRow({
       title: thread.title || THREAD_NAMES[thread.kind],
       detail: [THREAD_NAMES[thread.kind], thread.style, when(thread.updated)].filter(Boolean).join(" · "),
       onClick: () => { location.hash = hashes.thread(project, thread.id); },
       aside: thread.waiting ? pill(t("Your turn"), { tone: "accent", dot: "static", small: true })
         : agentAttached() ? pill(t("Working"), { tone: "accent", dot: "live", small: true }) : pill(t("Waiting for the agent"), { small: true })
-    }))) : h("p", { class: "muted panel-hint", text: t("Conversations about the project, a style, or an image show up here.") })
+    }))) : h("p", { class: "muted panel-hint", text: t("Talk with the agent about the project or a style. What it makes while talking lands on the canvas.") })
   );
 }
 
@@ -183,15 +183,10 @@ function newStyle() {
   });
 }
 
-async function newIdeation() {
-  const styles = drawableStyles();
-  const style = styles.length === 1 ? styles[0].name : await ask({
-    title: t("New ideation"), description: t("Work out what to draw in conversation. Choose the style it will be drawn in."), confirm: t("Start"), input: null,
-    choices: styles.map(each => ({ value: each.name, title: each.name, detail: each.purpose }))
-  });
-  if (!style) return;
+// A conversation about the project: its brief, or working out what to make when the user does not know yet.
+async function newThread() {
   try {
-    const made = await api("/api/threads", { project: board.project, style, kind: "ideation" });
+    const made = await api("/api/threads", { project: board.project, kind: "project" });
     location.hash = hashes.thread(board.project, made.thread);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -249,6 +244,8 @@ function nodeHead(node, extra = []) {
     h("span", { class: "node-id", text: node.id }),
     h("span", { class: "node-kind", text: node.tool ? TOOL_NAMES[node.tool] : KIND_NAMES[node.kind] }),
     node.style ? h("a", { class: "node-style", href: hashes.style(board.project, node.style, node.revision), text: `${node.style} · r${node.revision}`, title: t("{style} at revision {revision}", { style: node.style, revision: node.revision }) }) : null,
+    node.draft ? pill(t("Draft"), { small: true, title: t("Drawn with the draft model to settle a question in conversation, not in the style") }) : null,
+    node.thread ? h("a", { class: "node-style", href: hashes.thread(board.project, node.thread), text: node.thread, title: t("Made in a thread") }) : null,
     h("span", { class: "grow" }),
     statusPill(node),
     tool("more", t("More"), event => openNodeMenu(node, event), { quiet: true }),
@@ -514,6 +511,13 @@ function lineageParent(node, known) {
   return node.parents.map(nodeOfPath).find(id => known.has(id) && id !== node.id) || null;
 }
 
+// What a new node with no parent is drawn beside: the last node made in the same thread, so a round's drafts sit in a row.
+function threadNeighbor(node, nodes, positions) {
+  if (!node.thread) return null;
+  const before = nodes.filter(other => other.thread === node.thread && other.id !== node.id && positions[other.id] && Number(other.id.slice(1)) < Number(node.id.slice(1)));
+  return before.length ? before[before.length - 1].id : null;
+}
+
 function placeNodes(nodes, frames, saved) {
   const known = new Set(nodes.map(node => node.id));
   if (!nodes.some(node => saved[node.id])) return lineageLayout(nodes, frames, known);
@@ -523,7 +527,7 @@ function placeNodes(nodes, frames, saved) {
   const rects = () => Object.entries(positions).map(([id, [x, y]]) => ({ x, y, right: x + sizeOf(id).width, bottom: y + sizeOf(id).height }));
   for (const node of nodes) {
     if (positions[node.id]) continue;
-    const parent = lineageParent(node, known);
+    const parent = lineageParent(node, known) || threadNeighbor(node, nodes, positions);
     const placed = rects();
     let x, y;
     if (parent && positions[parent]) [x, y] = [positions[parent][0] + sizeOf(parent).width + GAP_X, positions[parent][1]];

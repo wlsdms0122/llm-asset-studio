@@ -8,7 +8,7 @@ A style is two things: `style.md`, the style in words, which the agent writes, a
 
 Everything else is either material or translation:
 
-- Material: the images the user attaches, candidate images, what is made on the canvas, and the conversation. They are what the agent reads to write `style.md`. A made image or text becomes a reference only when the user chooses it as one.
+- Material: what is made on the canvas (the images the user sends, drafts, drawn images, texts) and the conversation. They are what the agent reads to write `style.md`. A made image or text becomes a reference only when the user chooses it as one.
 - Translation: `prompting/<model>.md`, one per model the style can draw with, and the model in use (`style.json`). Models differ in how they read prompts and references, so each model gets its own way of writing this style, and the model can change without the style changing.
 
 A style is only a style. It is how images look: medium, shape, camera, line, light, color, materials, texture, detail, composition. It is not what they show. A style made for app icons, illustrations, or cute characters in general draws any subject, so nothing of the domain it was first wanted for goes into it: not into `style.md`, the candidates, the samples, or the references. A reference image is read for how it looks, never for what it shows; a sheet of weather icons says "soft inflated plastic, top-left light", not "clouds". Only a style the user scopes to a domain carries that domain, and the Use section of `style.md` says which kind a style is.

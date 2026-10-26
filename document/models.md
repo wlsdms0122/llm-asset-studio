@@ -20,14 +20,14 @@ The real cost of every call comes back in `usage.cost` and is written to `calls.
 
 ## Choosing a model
 
-- Discovery and ideation candidates: the draft model, below.
+- Drafts in a thread (readings of a style, ideas for an image): the draft model, below.
 - Probes and generation: one model per style, chosen for how well it renders that kind of look, whether it takes references, and price. Seedream 5.0 Flash is the current default.
 - Comparing expensive models (GPT Image 2.5, Recraft V4 Styles, Nano Banana 2.1) is worth it only when a style's first-try acceptance is low.
 - New models are unstable for their first days (one had about 43% availability on launch day). Prefer a model that has been out a few weeks.
 
 ## The draft model
 
-Discovery and ideation candidates are drafts. They show which way a style or an image goes, not its quality, so they come from the cheapest model that can show it, not from the style's model. Free models come and go, so the draft model is chosen when a thread's first drafts are due:
+Drafts in a thread are generation nodes drawn with the draft model (`node.py add --draft <model>`). They show which way a style or an image goes, not its quality, so they come from the cheapest model that can show it, not from the style's model. Free models come and go, so the draft model is chosen when a thread's first drafts are due:
 
 1. `open-package models --free` lists the image models that are free today. If one can show what the drafts need, it is the draft model.
 2. Otherwise (the command exits 1 when nothing is free; exit 3 means some prices could not be read, so it is run again), the draft model is the first of these that `open-package models` still lists and that can show it:

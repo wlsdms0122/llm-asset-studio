@@ -376,7 +376,7 @@
     ]);
     const reason = revision.reason ? h("p", { class: "revision-reason", text: revision.reason }) : null;
     const drawn = revision.drawn.length ? h("div", { class: "thumbs" }, revision.drawn.map(item => thumb(projectFile(item.path), {
-      small: true, badge: item.node, title: t("{node} on the canvas", { node: item.node }), onClick: () => { location.hash = hashes.project(project(), item.node); }
+      small: true, badge: item.draft ? t("Draft") : item.node, title: t("{node} on the canvas", { node: item.node }), onClick: () => { location.hash = hashes.project(project(), item.node); }
     }))) : null;
     if (!detail) {
       const at = route;

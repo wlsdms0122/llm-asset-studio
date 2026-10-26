@@ -3,7 +3,8 @@
 What comes out of a node is material: it can go into a style's references, or be what another request builds on.
 
   projects/<project>/nodes/<id>/        id is n1, n2, ...: short, so the user can name a node in conversation
-    node.json       written once by the surface that asked: kind, request, style and revision, parents, attachments, tool
+    node.json       written once by whoever asked: kind, request, style and revision, the draft model, parents,
+                    attachments, tool, the thread it was made in
     attachments/    images sent with the request, or the file the user brought
     result.json     written once by whoever made it: the images or the text, the agent's note and reviews, the model
                     it was drawn with, the references attached and the ones left out with why
@@ -12,21 +13,27 @@ What comes out of a node is material: it can go into a style's references, or be
     text.md         the text the agent wrote
 
 Three kinds:
-  generation  the user's request answered by the agent: drawn with a style at a revision, or, with no style, written
-              as a text (a palette, design tokens, a brief for a set of images); parents are what it builds on, so
-              refining an image or a text is a new node whose parent is it
+  generation  a request answered by the agent: drawn with a style at a revision, or, with no style, written as a text
+              (a palette, design tokens, a brief for an image); parents are what it builds on, so refining an image
+              or a text is a new node whose parent is it. A draft is drawn with the draft model to settle a question
+              in a conversation (a reading of a style, an idea for an image), not to show the style; the agent asks
+              for it, with the style when there is one
   tool        work on finished images that needs no drawing, done here by the engine at no cost (cutout)
   upload      an image or a text the user brought
 
 A generation names the revision it draws with when it is asked for: the one the user chose, else the latest, recorded
 then if the style changed since. The canvas draws an edge from every parent to its node; nothing else records edges.
+Everything made in a project is a node, whatever asked for it: a thread round points to the nodes it shows, and an
+image the user sends in a thread is an upload node.
 
 Commands:
   add <project> --style S [--revision N] --request R [--parent FILE ...] [--attach IMG ...]
                                                             a generation node drawn with a style
   add <project> --request R [--parent FILE ...]             a generation node the agent writes as a text
+  add <project> --draft MODEL [--style S] --request R [--thread T]
+                                                            a draft, drawn with the draft model
   add <project> --tool cutout --parent IMG ...              a tool node, run at once
-  add <project> --upload FILE                               an upload node: an image, or a text (.md, .txt)
+  add <project> --upload FILE [--thread T]                  an upload node: an image, or a text (.md, .txt)
   publish <node> [--note N] [--describe D ...] [--review V ...] [--drop REF=WHY ...] [files]
   publish <node> --text FILE [--note N]                     a written generation's text
   show <node>
@@ -75,8 +82,8 @@ class Node:
         return sorted(found, key=lambda node: int(node.id[1:]))
 
     @classmethod
-    def create(cls, project, kind, request="", style=None, revision=None, parents=(), attachments=(), tool=None, thread=None, surface="chat"):
-        """attachments are (file name, content) pairs."""
+    def create(cls, project, kind, request="", style=None, revision=None, parents=(), attachments=(), tool=None, draft=None, thread=None, surface="chat"):
+        """attachments are (file name, content) pairs; draft is the draft model a draft is drawn with."""
         if kind not in KINDS:
             raise RecordError(f"a node is one of {', '.join(sorted(KINDS))}")
         request = " ".join(request.split()) if kind != "generation" else request.strip()
@@ -86,13 +93,17 @@ class Node:
                 raise RecordError("a generation needs a request")
             if style:
                 style = project.style(style)
-                # The latest is checked before it is recorded, so a refused request leaves no revision behind.
-                reason = style.blocked() if revision is None else style.snapshot(int(revision)).blocked()
+                # A chosen revision must exist. A draft tries the words before the style can draw; otherwise the latest
+                # is checked before it is recorded, so a refused request leaves no revision behind.
+                snapshot = style if revision is None else style.snapshot(int(revision))
+                reason = None if draft else snapshot.blocked()
                 if reason:
                     raise RecordError(reason)
                 revision = style.revision() if revision is None else int(revision)
-            elif attachments:
-                raise RecordError("images are attached to a request drawn with a style")
+            elif attachments and not draft:
+                raise RecordError("images are attached to a request that is drawn")
+        elif draft:
+            raise RecordError("only a generation is drawn as a draft")
         if kind == "tool":
             if tool not in TOOLS:
                 raise RecordError(f"a tool is one of {', '.join(sorted(TOOLS))}")
@@ -100,6 +111,7 @@ class Node:
                 raise RecordError("a tool works on images: give the images as parents")
         if kind == "upload" and len(attachments) != 1:
             raise RecordError("an upload is one image or one text")
+        thread = thread and project.thread(thread).id
         directory = workspace.claim_number(project.path / "nodes", "n")
         names = []
         if attachments:
@@ -120,6 +132,8 @@ class Node:
         if kind == "generation" and style:
             record["style"] = style.name
             record["revision"] = revision
+        if draft:
+            record["draft"] = draft
         if tool:
             record["tool"] = tool
         if thread:
@@ -150,10 +164,15 @@ class Node:
         return self.record.get("revision")
 
     @property
+    def draft(self):
+        """The draft model a draft is drawn with; None for a node drawn with its style's model."""
+        return self.record.get("draft")
+
+    @property
     def output(self):
         """What comes out of it: image, or text for a generation the agent writes and an upload of a text."""
         if self.kind == "generation":
-            return "image" if self.style else "text"
+            return "image" if self.style or self.draft else "text"
         if self.kind == "upload":
             return "text" if Path(self.record["attachments"][0]).suffix in TEXT_SUFFIXES else "image"
         return "image"
@@ -201,9 +220,9 @@ class Node:
             write_once(self.directory / "result.json", {"text": "text.md", "note": note, "time": timestamp()})
             workspace.heartbeat()
             return
-        images = [Path(file).resolve() for file in files] if files else drawn(self.directory)
+        images = [Path(file).resolve() for file in files] if files else images_in(self.directory)
         for image in images:
-            if self.directory.resolve() not in image.parents or not image.is_file() or image.parent.name == "attachments":
+            if image.parent != self.directory.resolve() or not image.is_file():
                 raise RecordError(f"{image} is not an image drawn into {self.id}")
         if len(descriptions) not in (0, len(images)) or len(reviews) not in (0, len(images)):
             raise RecordError(f"give one description and one review per image, {len(images)} images")
@@ -238,6 +257,7 @@ class Node:
             "request": self.record.get("request", ""),
             "style": self.style,
             "revision": self.revision,
+            "draft": self.draft,
             "tool": self.record.get("tool"),
             "thread": self.record.get("thread"),
             "parents": self.record["parents"],
@@ -265,15 +285,18 @@ class Node:
         shutil.rmtree(self.directory)
 
 
-def drawn(directory):
-    """The images generated into a node or a round, its subfolders included, attachments left out."""
-    directory = Path(directory)
-    return images_in(directory) + [path for folder in sorted(directory.iterdir()) if folder.is_dir() and folder.name != "attachments" for path in images_in(folder)]
-
-
 def views(project):
-    """Every node of a project as the canvas shows it."""
-    return [node.view() for node in project.nodes()]
+    """Every node of a project as the canvas shows it. A node made in a thread the user deleted names no thread."""
+    threads = {thread.id for thread in project.threads()}
+    return [{**view, "thread": view["thread"] if view["thread"] in threads else None} for view in (node.view() for node in project.nodes())]
+
+
+def in_project(project, path):
+    """A workspace path given on the command line, as a path in the project."""
+    resolved = workspace.resolve(path)
+    if not workspace.inside(resolved, project.path):
+        raise RecordError(f"{path} is not in {project.name}; give it from the workspace, as projects/{project.name}/nodes/...")
+    return project.relative(resolved)
 
 
 def run_in_background(node):
@@ -286,15 +309,16 @@ def main():
     try:
         if arguments.command == "add":
             project = Project.at(arguments.project if "/" in arguments.project else f"projects/{arguments.project}")
-            parents = [project.relative(workspace.resolve(path)) for path in arguments.parent]
+            parents = [in_project(project, path) for path in arguments.parent]
+            thread = arguments.thread
             if arguments.upload:
-                node = Node.create(project, "upload", attachments=[(Path(arguments.upload).name, Path(arguments.upload).read_bytes())])
+                node = Node.create(project, "upload", attachments=[(Path(arguments.upload).name, Path(arguments.upload).read_bytes())], thread=thread)
             elif arguments.tool:
-                node = Node.create(project, "tool", request=arguments.request, parents=parents, tool=arguments.tool)
+                node = Node.create(project, "tool", request=arguments.request, parents=parents, tool=arguments.tool, draft=arguments.draft)
                 node.run_tool()
             else:
                 attachments = [(Path(path).name, Path(path).read_bytes()) for path in arguments.attach]
-                node = Node.create(project, "generation", arguments.request, arguments.style, arguments.revision, parents, attachments)
+                node = Node.create(project, "generation", arguments.request, arguments.style, arguments.revision, parents, attachments, draft=arguments.draft, thread=thread)
             print(workspace.relative(node.directory))
             return
         node = Node.at(arguments.node)
@@ -317,7 +341,9 @@ def parse_arguments():
     adding.add_argument("--revision", type=int, help="generation: the style's revision to draw with; defaults to the latest")
     adding.add_argument("--request", default="", help="the user's words, as written")
     adding.add_argument("--parent", action="append", default=[], help="an image or a text it builds on, such as projects/deckit/nodes/n3/a.png, repeatable")
-    adding.add_argument("--attach", action="append", default=[], help="generation with a style: an image the user sent with the request, repeatable")
+    adding.add_argument("--attach", action="append", default=[], help="a drawn generation: an image the user sent with the request, repeatable")
+    adding.add_argument("--draft", help="a draft: the draft model to draw it with (document/models.md)")
+    adding.add_argument("--thread", help="the thread it is made in, t3 or projects/<project>/threads/t3")
     adding.add_argument("--tool", choices=sorted(TOOLS))
     adding.add_argument("--upload", help="an image or a text the user brought")
     publishing = commands.add_parser("publish")

@@ -107,6 +107,14 @@ class Project:
         from thread import Thread
         return Thread.all(self)
 
+    def thread(self, identifier):
+        """A thread of this project, named by its id (t3) or its folder."""
+        from thread import Thread
+        thread = next((thread for thread in self.threads() if thread.id == Path(str(identifier)).name), None)
+        if thread is None:
+            raise RecordError(f"{self.name} has no thread {identifier}")
+        return thread
+
     # Canvas
 
     @property
