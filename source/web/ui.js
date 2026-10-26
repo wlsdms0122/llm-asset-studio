@@ -318,7 +318,7 @@ function diffView(text) {
 // src: an address other than the workspace file, such as a stored object.
 function imageFrame(path, { fit = "natural", onClick = null, number = null, check = false, tools = [], lazy = true, src = null } = {}) {
   return h("div", { class: ["frame", fit === "fill" && "fill", onClick && "clickable"].filter(Boolean).join(" "), onclick: onClick }, [
-    h("img", { src: src || fileUrl(path), alt: "", loading: lazy ? "lazy" : null }),
+    h("img", { src: src || fileUrl(path), alt: "", loading: lazy ? "lazy" : null, decoding: "async" }),
     number != null ? h("span", { class: "number", text: String(number).padStart(2, "0") }) : null,
     check ? h("span", { class: "check", html: icon("check") }) : null,
     tools.filter(Boolean).length ? h("div", { class: "tools" }, tools) : null
@@ -329,7 +329,7 @@ function imageFrame(path, { fit = "natural", onClick = null, number = null, chec
 // src: an address other than the workspace file, such as a picked file not uploaded yet.
 function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null, badge = null, src = null } = {}) {
   return h(remove ? "div" : "button", { class: ["thumb", picked && "picked", small && "small"].filter(Boolean).join(" "), type: remove ? null : "button", title, onclick: onClick }, [
-    h("img", { src: src || fileUrl(path), alt: "", loading: "lazy" }),
+    h("img", { src: src || fileUrl(path), alt: "", loading: "lazy", decoding: "async" }),
     badge ? h("span", { class: "badge", text: badge }) : null,
     remove ? h("button", { class: "remove", type: "button", title: t("Remove"), html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
   ]);

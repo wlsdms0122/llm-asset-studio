@@ -29,7 +29,7 @@ function resetBoard(project) {
   Object.assign(board, {
     project, data: null, canvasSignature: null, panelSignature: null, stylesSignature: null, inspectorSignature: null,
     view: null, cards: new Map(), sizes: new Map(), geometry: new Map(), chips: new Map(), positions: {}, saved: {},
-    saveTimer: null, saving: false, viewTimer: null,
+    saveTimer: null, saving: false, viewTimer: null, restTimer: null, shownZoom: null,
     picked: new Set(), selected: new Set(),
     draft: { text: "", attachments: [], style: null, revision: null }, composer: null, sending: false,
     focus: null, spaceHeld: false, frame: null, dragging: null
@@ -659,12 +659,27 @@ function startView() {
   }
 }
 
+// A pan or a zoom touches only the world's transform, the grid behind it, and the frame titles that keep their size,
+// so no card's style is computed again. While the view moves the world is its own layer, moved and scaled as drawn;
+// it is drawn again at the new scale once the view rests.
 function applyView() {
   const { x, y, zoom } = board.view;
-  $("canvas-world").style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
-  $("canvas-viewport").style.setProperty("--zoom", zoom);
-  $("canvas-viewport").style.setProperty("--pan", `${x}px ${y}px`);
-  $("canvas-zoom").textContent = `${Math.round(zoom * 100)}%`;
+  const world = $("canvas-world");
+  world.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
+  world.classList.add("moving");
+  clearTimeout(board.restTimer);
+  board.restTimer = setTimeout(() => world.classList.remove("moving"), 160);
+  // The dots stay at least 12px apart on screen, doubling their spacing as the canvas zooms out.
+  let spacing = 24 * zoom;
+  while (spacing < 12) spacing *= 2;
+  const viewport = $("canvas-viewport");
+  viewport.style.backgroundSize = `${spacing}px ${spacing}px`;
+  viewport.style.backgroundPosition = `${x}px ${y}px`;
+  if (board.shownZoom !== zoom) {
+    board.shownZoom = zoom;
+    $("canvas-frames").style.setProperty("--zoom", zoom);
+    $("canvas-zoom").textContent = `${Math.round(zoom * 100)}%`;
+  }
   clearTimeout(board.viewTimer);
   board.viewTimer = setTimeout(() => { try { localStorage.setItem(viewKey(), JSON.stringify(board.view)); } catch {} }, 300);
 }

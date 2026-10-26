@@ -135,11 +135,12 @@ body.resizing { cursor: col-resize; user-select: none; }
 /* The canvas fills the stage under the composer. The world inside it is panned and zoomed with one transform;
    its layers sit at the world's origin, so a card's left and top are its place on the canvas. */
 .board-stage { overflow: hidden; }
-.canvas { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; background-color: var(--bg); background-image: radial-gradient(var(--line-strong) 1px, transparent 1.4px); background-size: calc(24px * var(--zoom, 1)) calc(24px * var(--zoom, 1)); background-position: var(--pan, 0 0); }
+.canvas { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; background-color: var(--bg); background-image: radial-gradient(var(--line-strong) 1px, transparent 1.4px); background-size: 24px 24px; }
 .canvas.panning { cursor: grab; }
 .canvas.dragging { cursor: grabbing; }
 .board-stage.dropping .canvas { box-shadow: inset 0 0 0 2px var(--accent); }
 .canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.canvas-world.moving { will-change: transform; }
 .canvas-frames, .canvas-nodes { position: absolute; left: 0; top: 0; }
 .canvas-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .edge { fill: none; stroke: color-mix(in srgb, var(--fg-faint) 70%, transparent); stroke-width: 2; vector-effect: non-scaling-stroke; }
