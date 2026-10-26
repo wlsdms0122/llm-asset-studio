@@ -179,7 +179,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .node-head .tool { width: 28px; height: 28px; flex: none; }
 .node-id { color: var(--fg); font: 700 var(--text-xs) var(--mono); }
 .node-kind { color: var(--fg-muted); font-weight: 600; white-space: nowrap; }
-.node-style { min-width: 0; overflow: hidden; color: var(--fg-faint); white-space: nowrap; text-overflow: ellipsis; text-decoration: none; }
+.node-style { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: var(--fg-faint); white-space: nowrap; text-overflow: ellipsis; text-decoration: none; }
+.node-style > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .node-style:hover { color: var(--fg); text-decoration: underline; }
 .node-request { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--text-md); font-weight: 600; line-height: 1.5; white-space: pre-line; word-break: break-word; }
 .node-from { display: flex; flex-wrap: wrap; gap: 6px; }

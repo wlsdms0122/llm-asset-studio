@@ -189,7 +189,7 @@
       data.purpose ? h("p", { class: "style-purpose", text: data.purpose }) : null,
       h("div", { class: "style-facts" }, [
         modelPicker(data),
-        latest ? h("span", { text: t("Revision {revision}", { revision: latest }), title: data.current == null ? t("Changes since this revision are recorded when the style next draws.") : "" }) : null
+        latest ? revisionTag(latest, { title: data.current == null ? t("Changes since this revision are recorded when the style next draws.") : null }) : null
       ])
     );
   }

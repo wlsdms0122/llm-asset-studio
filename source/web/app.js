@@ -372,6 +372,9 @@ function nodeImageItem(project, node, image, styles = null) {
     ]
   };
 }
+// A style's revision, wherever one is named: a tag that reads "Revision 7".
+const revisionTag = (number, options = {}) => pill(t("Revision {revision}", { revision: number }), { small: true, ...options });
+
 const ROLE_NAMES = { style: t("Style"), subject: t("Subject"), composition: t("Composition"), attachment: t("Attachment") };
 
 // ---------- home ----------

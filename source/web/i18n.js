@@ -231,7 +231,7 @@ const KO = {
   "Every change is a revision. Any of them can be drawn with: choose it next to the style when you write a request.": "바뀔 때마다 리비전이 하나씩 쌓여요. 어느 리비전으로든 그릴 수 있어요. 요청을 쓸 때 스타일 옆에서 고르면 돼요.",
   "Images are attached to a drawing": "이미지 첨부는 그림 요청에만 돼요",
   "Its rules, references, revisions, and threads are deleted. Images already made stay on the canvas. This cannot be undone.": "규칙, 레퍼런스, 리비전, 대화가 모두 지워져요. 이미 만든 이미지는 캔버스에 남아요. 되돌릴 수 없어요.",
-  "Latest (r{revision})": "최신 (r{revision})",
+  "Latest · revision {revision}": "최신 · 리비전 {revision}",
   "Models that take at least {count} reference, as many images as this style has. The agent writes how the style is prompted for it.": "레퍼런스를 {count}장 이상 받는 모델이에요. 이 스타일의 이미지 수만큼이요. 에이전트가 이 모델용 프롬프트 방식을 써요.",
   "Models that take at least {count} references, as many images as this style has. The agent writes how the style is prompted for it.": "레퍼런스를 {count}장 이상 받는 모델이에요. 이 스타일의 이미지 수만큼이요. 에이전트가 이 모델용 프롬프트 방식을 써요.",
   "New text": "새 글",
