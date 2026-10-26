@@ -6,37 +6,39 @@ and the user's answer to it. Every surface reads and writes through this file, s
 the web page and one given in conversation leave the same records, in the session's folder
 (sessions/<style>/<session id>/):
 
-  session.json          kind, when it started, and for a model session the model being added
+  session.json          kind, when it started, the name the user gave it, and for a model session the model being added
   prompting.md          a model session's prompting file until the model is added
-  brief.md              a generate session's brief: the image the agent and the user settled on in ideation
+  brief.md              an ideation session's brief: the image the agent and the user settled on
   NNN/round.json        written once by the agent: kind, candidates in display order, note
   NNN/feedback.json     written once by a surface: the user's answer
   NNN/attachments/      images the user attaches to the answer while the round is open
 
-Three kinds of session:
+Four kinds of session:
   make      the one session that makes a style; it ends when the user confirms. Until then style.md
             is rewritten freely; after that it never changes, and a different look is a new style.
-  generate  making images with a confirmed style. A style keeps as many as the user opens, each a
-            thread the user can come back to, until the user deletes it. It opens on the board, or in
-            ideation when the user does not yet know what to make: discover rounds where the agent, as
-            the designer, works out the image with the user and writes brief.md, the way a make
-            session's discover rounds find the style and write style.md. Either way the session can
-            move between the two.
+  generate  making images with a confirmed style, on a board: the user writes what to draw and
+            refines the attempts. A style keeps as many generate and ideation sessions as the user
+            opens, each a thread the user can come back to, until the user deletes it.
+  ideation  working out an image with a confirmed style, in conversation, for a user who does not
+            yet know what to make: discover rounds where the agent, as the designer, develops the
+            image with the user and writes brief.md, the way a make session's discover rounds find
+            the style and write style.md, and draws it with the style's model when the user asks.
   model     adding a model to a confirmed style: the agent writes the model's prompting file and the
             user tries it, one image per request, with the references attached. On "done" the
             agent runs `add-model`, the file joins prompting/, and the session ends.
 
 Kinds of round, by session:
-  discover  (make, generate) the conversation. The agent describes the style back, or in a generate
-            session (ideation) proposes and develops the image, and may show candidate images; the user replies, attaches images,
-            picks, and notes. "sample" moves on once style.md exists; in a generate session "generate"
-            moves on once brief.md exists, and candidates drawn with one of the style's models are archived.
+  discover  (make, ideation) the conversation. The agent describes the style back, or in ideation
+            proposes and develops the image, and may show candidate images; the user replies, attaches
+            images, picks, and notes. In a make session "sample" moves on once style.md exists. In
+            ideation "generate" asks for the image drawn from brief.md with the style's model, which
+            the next discover round shows; candidates drawn with one of the style's models are archived.
   sample    (make) style.md tried on the user's requests, one image per request, with no references.
             "request" asks for another, "discover" goes back, "confirm" moves on.
   confirm   (make) the sample images, and any the agent adds, offered as references. The user picks
             and answers "done", or "sample" to go back. The agent then runs `confirm`.
-  generate  (generate) "refine" builds on the picked attempt, "new" starts a new image, "discover"
-            goes to ideation. Every image shown is archived.
+  generate  (generate) "refine" builds on the picked attempt, "new" starts a new image. Every image
+            shown is archived.
   model     (model) "request" asks for another image, "done" adds the model. Every image shown is archived.
 Publishing a round of a carrying kind carries over the images of the last round of the same kind in
 that session. Boards read in the order images were drawn, the newest last; a confirm round shows the
@@ -45,7 +47,7 @@ picks still picked.
 
 Commands:
   new <name> [--from <style>]           create a style, from a confirmed one if given, with its make session
-  open <style> generate|model [--model M] [--ideation]
+  open <style> generate|ideation|model [--model M]
                                          open a session on a confirmed style and print its folder
   next <session>                         print the directory for the session's next round, creating it
   publish <round dir> --kind K [files]   write round.json; candidates default to the images in the directory
@@ -53,7 +55,9 @@ Commands:
   answer <session> ...                   record an answer given in conversation
   confirm <session>                      turn the user's picks into references/ and end the make session
   add-model <session>                    add the model a finished model session tried, and end it
+  rename <session> <name>                give a session the name the user calls it by
   delete <session>                       delete a session
+  watch                                  wait until a session is the agent's turn, and print the folders of all that are
 """
 
 import argparse
@@ -72,18 +76,21 @@ from style import Style, StyleError, cost_of, images_in, read_text, timestamp, w
 # The kinds of round each kind of session holds.
 ROUNDS = {
     "make": {"discover", "sample", "confirm"},
-    "generate": {"discover", "generate"},
+    "generate": {"generate"},
+    "ideation": {"discover"},
     "model": {"model"}
 }
 
-# The decisions each kind of round accepts. None is a reply that keeps the stage going; a stage
-# name moves forward to it or back to it, among the stages of that session.
+# The decisions each kind of round accepts in each kind of session. None is a reply that keeps the
+# conversation going; a stage name moves forward to it or back to it; in ideation "generate" asks for
+# the image drawn from the brief.
 DECISIONS = {
-    "discover": {None, "sample", "generate"},
-    "sample": {"request", "discover", "confirm"},
-    "confirm": {None, "done", "sample"},
-    "generate": {"refine", "new", "discover"},
-    "model": {"request", "done"}
+    ("make", "discover"): {None, "sample"},
+    ("make", "sample"): {"request", "discover", "confirm"},
+    ("make", "confirm"): {None, "done", "sample"},
+    ("ideation", "discover"): {None, "generate"},
+    ("generate", "generate"): {"refine", "new"},
+    ("model", "model"): {"request", "done"}
 }
 
 # Kinds whose images stay on screen from one round to the next.
@@ -93,7 +100,7 @@ CARRYING = {"sample", "confirm", "generate", "model"}
 BOARDS = {"sample", "generate", "model"}
 
 # What the user reads first. The rounds keep it, since a round records what was shown.
-NEW_STYLE_QUESTION = "어떤 스타일을 만들까요? 어디에 쓸 그림인지, 떠오르는 느낌을 편하게 적어 주세요. 비슷한 느낌의 이미지가 있으면 함께 올려 주세요."
+NEW_STYLE_QUESTION = "어떤 스타일을 만들까요? 스타일은 그림에 무엇이 나오는지가 아니라, 어떤 그림이든 같은 느낌으로 그리는 방식이에요. 납작한 벡터인지 손그림인지 3D인지, 선과 색, 빛과 질감 같은 것들이요. 어디에 쓸 그림인지, 떠오르는 느낌을 편하게 적어 주세요. 비슷한 느낌의 이미지가 있으면 함께 올려 주세요."
 BASE_QUESTION = "{base} 를 바탕으로 새 스타일을 만듭니다. 바꾸고 싶은 점을 적어 주세요. 작은 수정도, 방향을 바꾸는 것도 괜찮아요."
 GENERATE_QUESTION = "무엇을 만들까요?"
 IDEATION_QUESTION = "어떤 이미지가 필요하세요? 어디에 쓸지, 누가 보는지, 떠오르는 것을 편하게 적어 주세요. 참고할 이미지가 있으면 함께 올려 주세요."
@@ -170,7 +177,7 @@ class Session:
         return self.directory / "brief.md"
 
     def brief(self):
-        return read_text(self.brief_file) if self.kind == "generate" else None
+        return read_text(self.brief_file) if self.kind == "ideation" else None
 
     @property
     def prompting_file(self):
@@ -206,7 +213,9 @@ class Session:
         return directory
 
     def title(self):
-        """What the user calls the session: the model it adds, the image its brief names, or the first thing asked of it."""
+        """What the user calls the session: the name they gave it, the model it adds, the image its brief names, or the first thing asked of it."""
+        if self.record.get("name"):
+            return self.record["name"]
         if self.kind == "model":
             return self.record["model"]
         heading = next((line for line in (self.brief() or "").splitlines() if line.strip()), "").lstrip("# ").strip()
@@ -226,8 +235,6 @@ class Session:
             "kind": self.kind,
             "title": self.title(),
             "model": self.record.get("model"),
-            # A generate session that has talked is in ideation; one that has only drawn is making an image.
-            "ideation": self.kind == "generate" and any(Round(self, path).kind == "discover" for path in self.rounds() if (path / "round.json").exists()),
             "started": self.started,
             "updated": (answer or {}).get("time") or (latest.record.get("time") if latest else self.started),
             # The user's turn when a round waits for an answer; the agent's when none is shown yet or the last is answered.
@@ -241,6 +248,21 @@ class Session:
             if (directory / "feedback.json").exists() and (directory / "round.json").exists():
                 reviews.update(json.loads((directory / "round.json").read_text(encoding="utf-8")).get("reviews", {}))
         return reviews
+
+    def rename(self, name):
+        name = " ".join(name.split())
+        if not name:
+            raise StyleError("a session's name cannot be empty")
+        self.record["name"] = name
+        write_json(self.directory / "session.json", self.record)
+
+    def refined_from(self, path):
+        """The attempt an image was drawn from: what the user picked in the answer that asked for it."""
+        relative = Path(path).relative_to(self.style.relative(self.directory))
+        if not relative.parts[0].isdigit():
+            return None
+        answer = json.loads(read_text(self.directory / f"{int(relative.parts[0]) - 1:03d}" / "feedback.json") or "{}")
+        return answer["picked"][0] if answer.get("decision") == "refine" else None
 
     def delete(self):
         shutil.rmtree(self.directory)
@@ -316,8 +338,10 @@ class Round:
                 "path": path,
                 "name": None if blind else Path(path).name,
                 "request": made.get(path, {}).get("request"),
+                "refined_from": self.session.refined_from(path) if self.kind == "generate" else None,
                 "prompt": made.get(path, {}).get("prompt"),
                 "model": None if blind else made.get(path, {}).get("model"),
+                "tool": None if blind else made.get(path, {}).get("tool"),
                 "cost": None if blind else cost_of(made.get(path, {})),
                 "description": self.record.get("descriptions", {}).get(path),
                 "new": path.startswith(here + "/"),
@@ -362,7 +386,7 @@ class Round:
     def submit(self, picked, notes, comment, request, decision, surface):
         if self.feedback() is not None:
             raise StyleError(f"round {self.number} is already answered")
-        if decision not in DECISIONS[self.kind] or (decision in DECISIONS and decision not in ROUNDS[self.session.kind]):
+        if decision not in DECISIONS[self.session.kind, self.kind]:
             raise StyleError(f"{self.kind} round in a {self.session.kind} session cannot be answered with {decision}")
         request = request.strip()
         picked = sorted(set(picked))
@@ -491,10 +515,10 @@ def publish(session, directory, kind, note, files=None, blind=False, fresh=False
         record["references"] = style.reference_records()
     write_json(directory / "round.json", record)
 
-    # Every image drawn with a confirmed style is kept. In a generate session's talk that is a candidate drawn
-    # with one of the style's models; a rough from another model is a question, not the style.
+    # Every image drawn with a confirmed style is kept. In ideation that is a candidate drawn with one of the
+    # style's models; a rough from another model is a question, not the style.
     for path in new:
-        if kind in ("generate", "model") or (session.kind == "generate" and style.ledger().made(path).get("model") in style.models()):
+        if kind in ("generate", "model") or (session.kind == "ideation" and style.ledger().made(path).get("model") in style.models()):
             style.archive(path, kind)
 
 
@@ -537,14 +561,25 @@ def create_style(styles, name, base=None):
     return style
 
 
-def open_session(style, kind, model=None, ideation=False):
-    """A generate session opens on an empty board, or in ideation; a model session waits for the agent to write the prompting file."""
-    if ideation and kind != "generate":
-        raise StyleError("only a generate session opens in ideation")
+def open_session(style, kind, model=None):
+    """A generate session opens on an empty board and an ideation session on its first question; a model session
+    waits for the agent to write the prompting file."""
     session = Session.open(style, kind, model)
     if kind == "generate":
-        start(session, "discover" if ideation else "generate", IDEATION_QUESTION if ideation else GENERATE_QUESTION)
+        start(session, "generate", GENERATE_QUESTION)
+    if kind == "ideation":
+        start(session, "discover", IDEATION_QUESTION)
     return session
+
+
+def agents_turn(styles):
+    """Every session the agent owes a round: one whose last round the user answered, or a model session with none yet."""
+    while True:
+        try:
+            return [session for style in Style.all(styles) for session in Session.all(style) if not session.summary()["waiting"]]
+        except OSError:
+            # A session deleted or confirmed while it was being read; the next look finds it gone.
+            time.sleep(0.2)
 
 
 def confirm(session):
@@ -596,7 +631,12 @@ def main():
             style = Style(arguments.style)
             if not style.exists():
                 raise StyleError(f"no style at {arguments.style}")
-            print(open_session(style, arguments.kind, arguments.model, arguments.ideation).directory)
+            print(open_session(style, arguments.kind, arguments.model).directory)
+        elif arguments.command == "watch":
+            while not (sessions := agents_turn(workspace.STYLES)):
+                time.sleep(2)
+            for session in sessions:
+                print(session.style.relative(session.directory))
         elif arguments.command == "publish":
             directory = Path(arguments.directory).resolve()
             if not directory.is_dir():
@@ -626,6 +666,8 @@ def main():
                 print(confirm(session))
             elif arguments.command == "add-model":
                 print(add_model(session))
+            elif arguments.command == "rename":
+                session.rename(arguments.name)
             elif arguments.command == "delete":
                 session.delete()
     except StyleError as error:
@@ -642,17 +684,21 @@ def parse_arguments():
 
     opening = commands.add_parser("open")
     opening.add_argument("style", help="the style directory, such as styles/app-icon")
-    opening.add_argument("kind", choices=["generate", "model"])
+    opening.add_argument("kind", choices=["generate", "ideation", "model"])
     opening.add_argument("--model", help="model session: the OpenRouter model id to add")
-    opening.add_argument("--ideation", action="store_true", help="generate session: open in ideation instead of on the board")
 
+    commands.add_parser("watch")
     for command in ("next", "show", "confirm", "add-model", "delete"):
         commands.add_parser(command).add_argument("session", help="the session folder, such as sessions/app-icon/20261011-230012")
 
+    renaming = commands.add_parser("rename")
+    renaming.add_argument("session")
+    renaming.add_argument("name")
+
     publishing = commands.add_parser("publish")
     publishing.add_argument("directory", help="the round directory printed by next")
-    publishing.add_argument("--kind", required=True, choices=sorted(DECISIONS))
-    publishing.add_argument("--note", default="", help="the agent's message: in discover, the style (in a generate session, the image) in plain words, what changed, and the questions")
+    publishing.add_argument("--kind", required=True, choices=sorted({kind for kinds in ROUNDS.values() for kind in kinds}))
+    publishing.add_argument("--note", default="", help="the agent's message: in discover, the style (in ideation, the image) in plain words, what changed, and the questions")
     publishing.add_argument("--blind", action="store_true", help="shuffle and hide file and model names")
     publishing.add_argument("--describe", action="append", default=[], help="one plain line per image, in file order: the reading a candidate tests, or what the agent has to say about it")
     publishing.add_argument("--review", action="append", default=[], help="one verdict per new image, in file order, as document/review.md writes it; shown only after the user answers")
@@ -665,7 +711,7 @@ def parse_arguments():
     answering.add_argument("--note", action="append", default=[], help="number=text, a note on an image, picked or not, repeatable")
     answering.add_argument("--comment", default="", help="the user's reply")
     answering.add_argument("--request", default="", help="sample, generate, model: the user's words for the next image, as written")
-    answering.add_argument("--decision", choices=sorted({d for kind in DECISIONS.values() for d in kind if d}), help="a stage to move to (sample, confirm, discover, generate), done, or what to do next on a board")
+    answering.add_argument("--decision", choices=sorted({d for kind in DECISIONS.values() for d in kind if d}), help="a stage to move to (sample, confirm, discover), generate in ideation, done, or what to do next on a board")
 
     return parser.parse_args()
 

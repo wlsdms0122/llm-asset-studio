@@ -7,7 +7,7 @@ version = "1.0.0"
 name = "asset-studio"
 version = "0.1.0"
 description = "Makes image styles with the user in conversation and generates images in them through OpenRouter, with a web studio over the same records"
-requires = ["python3"]
+requires = ["python3", "swift"]
 
 [command]
 # Every command runs inside the workspace, ~/.config/asset-studio or $ASSET_STUDIO_HOME (see source/engine/workspace.py).
@@ -16,5 +16,7 @@ session = "python3 source/engine/session.py"
 generate = "python3 source/engine/generate.py"
 style = "python3 source/engine/style.py"
 sheet = "python3 source/engine/sheet.py"
+models = "python3 source/engine/catalog.py"
+cutout = "python3 source/engine/cutout.py"
 key = "python3 source/engine/workspace.py key"
 verify = "python3 source/verify.py"

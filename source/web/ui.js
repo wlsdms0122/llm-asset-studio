@@ -17,7 +17,14 @@ const ICONS = {
   down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   previous: '<path d="m15 18-6-6 6-6"/>',
-  next: '<path d="m9 18 6-6-6-6"/>'
+  next: '<path d="m9 18 6-6-6-6"/>',
+  send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+  languages: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
+  text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'
 };
 
 const $ = id => document.getElementById(id);
@@ -47,8 +54,8 @@ function h(tag, properties = {}, children = []) {
 // ---------- actions ----------
 
 // variant: "" (secondary), primary, success, danger, ghost. A panel has one primary.
-function button(label, { variant = "", small = false, grow = false, onClick, title, disabled, hidden, iconName } = {}) {
-  const node = h("button", { class: ["button", variant, small && "small", grow && "grow"].filter(Boolean).join(" "), type: "button", title, disabled, hidden, onclick: onClick });
+function button(label, { variant = "", small = false, grow = false, onClick, title, disabled, hidden, iconName, class: extra = null } = {}) {
+  const node = h("button", { class: ["button", variant, small && "small", grow && "grow", extra].filter(Boolean).join(" "), type: "button", title, disabled, hidden, onclick: onClick });
   if (iconName) node.innerHTML = icon(iconName);
   node.append(h("span", { text: label }));
   return node;
@@ -58,6 +65,18 @@ function iconButton(iconName, title, onClick, { variant = "", small = false, dis
   return h("button", { class: ["button", "icon-only", variant, small && "small"].filter(Boolean).join(" "), type: "button", title, "aria-label": title, disabled, hidden, onclick: onClick, html: icon(iconName) });
 }
 
+// An icon button that opens a menu of choices under itself, such as the theme or the language.
+// options: [{ value, label }]; value is the current one.
+function menuButton(iconName, title, { value, options, onChange }) {
+  const node = iconButton(iconName, title, event => {
+    event.stopPropagation();
+    const box = node.getBoundingClientRect();
+    openMenu({ x: box.left, y: box.bottom + 4 }, options.map(option => ({ label: option.label, checked: option.value === value, onClick: () => { if (option.value !== value) onChange(option.value); } })));
+  }, { variant: "ghost" });
+  node.setAttribute("aria-haspopup", "menu");
+  return node;
+}
+
 // A button that opens the file picker for images.
 function uploadButton(title, onFiles, { iconName = "clip", label = null, variant = "" } = {}) {
   const input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: true });
@@ -65,26 +84,90 @@ function uploadButton(title, onFiles, { iconName = "clip", label = null, variant
   return h("label", { class: ["button", variant, label ? "" : "icon-only"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) + (label ? `<span>${label}</span>` : "") }, [input]);
 }
 
-// An action over an image (zoom, download, add to references): an icon that shows on hover.
-function tool(iconName, title, onClick, { href = null, download = null, on = false, quiet = false } = {}) {
-  const properties = { class: ["tool", on && "on", quiet && "quiet"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) };
+// An action over an image (zoom, download, add to references): an icon that shows on hover. danger: turns red on hover.
+function tool(iconName, title, onClick, { href = null, download = null, on = false, quiet = false, danger = false } = {}) {
+  const properties = { class: ["tool", on && "on", quiet && "quiet", danger && "danger"].filter(Boolean).join(" "), title, "aria-label": title, html: icon(iconName) };
   if (href) return h("a", { ...properties, href, download, onclick: event => event.stopPropagation() });
   return h("button", { ...properties, type: "button", onclick: event => { event.stopPropagation(); onClick(event); } });
 }
 
 // ---------- rows ----------
 
-// One thing in a list to open or choose (a model, a session). aside: a pill or a quiet tool at the end.
-function listRow({ title, detail = null, aside = null, onClick = null, current = false, hint = null }) {
+// [label, value] pairs shown as a line of labeled values, such as a model's price and the references it takes.
+function specList(specs) {
+  return h("dl", { class: "specs" }, specs.filter(Boolean).map(([label, value]) => h("div", {}, [h("dt", { text: label }), h("dd", { text: value })])));
+}
+
+// One thing in a list to open or choose (a model, a session). aside: a pill or a quiet tool at the end; specs: specList pairs.
+function listRow({ title, detail = null, aside = null, onClick = null, current = false, hint = null, specs = null }) {
   const act = () => { if (onClick && !current) onClick(); };
   return h("div", { class: `row-item${current ? " current" : ""}`, role: "button", tabindex: 0, title: hint, onclick: act, onkeydown: event => { if (event.key === "Enter") act(); } }, [
-    h("div", { class: "row-text" }, [h("strong", { text: title }), detail ? h("small", { text: detail }) : null]),
+    h("div", { class: "row-text" }, [h("strong", { text: title }), detail ? h("small", { text: detail }) : null, specs ? specList(specs) : null]),
     aside
   ]);
 }
 
 function rowList(rows) {
   return h("div", { class: "rows" }, rows);
+}
+
+// ---------- composer ----------
+
+const COMPOSER_MAX = 240;
+
+// The message box under a conversation: images above the text, attach at the left of the bar under it, send at the right.
+// The box grows and shrinks smoothly with the text and the images, and Cmd or Ctrl+Enter sends.
+// node.send is the send button, for the page to enable; node.setImages([{ key, node }]) shows the images that go with
+// the message, bringing new ones in and taking removed ones out with a motion, and keeping the rest in place.
+function composer({ value = "", placeholder = "", sendTitle, onInput = null, onSend, attach = null }) {
+  const input = h("textarea", { rows: 1, placeholder, value });
+  const send = h("button", { class: "button primary icon-only composer-send", type: "button", title: sendTitle, "aria-label": sendTitle, html: icon("send"), onclick: onSend });
+  // The height a text box needs is measured on a hidden copy, so the box itself goes from one height to the next.
+  const fit = () => {
+    const copy = h("textarea", { rows: 1, value: input.value, style: `position: absolute; visibility: hidden; height: auto; transition: none; width: ${input.clientWidth}px` });
+    copy.className = input.className;
+    input.parentNode.append(copy);
+    const needed = copy.scrollHeight;
+    copy.remove();
+    input.style.height = `${Math.min(needed, COMPOSER_MAX)}px`;
+    input.style.overflowY = needed > COMPOSER_MAX ? "auto" : "hidden";
+  };
+  input.addEventListener("input", () => { fit(); if (onInput) onInput(input.value); });
+  input.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    if (!send.disabled) send.click();
+  });
+  const thumbs = h("div", { class: "thumbs" });
+  const images = h("div", { class: "composer-images" }, [thumbs]);
+  const node = h("div", { class: "composer" }, [images, input, h("div", { class: "composer-bar" }, [attach, h("span", { class: "grow" }), send])]);
+  node.send = send;
+  node.setImages = items => {
+    const keys = new Set(items.map(item => item.key));
+    for (const child of [...thumbs.children]) {
+      if (keys.has(child.dataset.key) || child.classList.contains("leaving")) continue;
+      child.classList.add("leaving");
+      child.addEventListener("animationend", () => child.remove(), { once: true });
+    }
+    let before = null;
+    for (const item of [...items].reverse()) {
+      let child = [...thumbs.children].find(each => each.dataset.key === item.key && !each.classList.contains("leaving"));
+      if (!child) {
+        child = item.node;
+        child.dataset.key = item.key;
+        if (node.isConnected) child.classList.add("enter");
+      }
+      thumbs.insertBefore(child, before);
+      before = child;
+    }
+    images.classList.toggle("shown", items.length > 0);
+  };
+  requestAnimationFrame(() => {
+    input.style.transition = "none";
+    fit();
+    requestAnimationFrame(() => { input.style.transition = ""; });
+  });
+  return node;
 }
 
 // ---------- labels ----------
@@ -127,10 +210,12 @@ function imageFrame(path, { fit = "natural", onClick = null, number = null, chec
   ]);
 }
 
-function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null } = {}) {
+// badge: a short label over the image's lower left corner, such as the number of a picked attempt.
+function thumb(path, { onClick = null, picked = false, small = false, title = null, remove = null, badge = null } = {}) {
   return h(remove ? "div" : "button", { class: ["thumb", picked && "picked", small && "small"].filter(Boolean).join(" "), type: remove ? null : "button", title, onclick: onClick }, [
     h("img", { src: fileUrl(path), alt: "", loading: "lazy" }),
-    remove ? h("button", { class: "remove", type: "button", title: "빼기", html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
+    badge ? h("span", { class: "badge", text: badge }) : null,
+    remove ? h("button", { class: "remove", type: "button", title: t("Remove"), html: icon("close"), onclick: event => { event.stopPropagation(); remove(); } }) : null
   ]);
 }
 
@@ -184,10 +269,16 @@ function toast(message, kind = "") {
 let settleModal = null;
 
 // input: "text" (one line), "long" (a paragraph), or null for a plain confirmation.
-// choices: [{ value, title, detail?, aside? }] shows a list to pick one from. Resolves to the answer, or null when cancelled.
-function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "" }) {
+// choices: [{ value, title, detail?, aside?, specs? }] shows a list to pick one from; specs are [label, value] pairs. Resolves to the answer, or null when cancelled.
+// text: a long text to read, such as a prompt, shown wide with only the confirm button.
+function ask({ title, description = "", value = "", placeholder = "", confirm, input = "long", choices = null, danger = false, error = "", text = null }) {
+  if (text != null) input = null;
   $("modal-title").textContent = title;
   $("modal-description").textContent = description;
+  $("modal-document").hidden = text == null;
+  $("modal-document").textContent = text || "";
+  $("modal-form").classList.toggle("wide", text != null);
+  $("modal-cancel").hidden = text != null;
   $("modal-input").hidden = !input;
   $("modal-input").value = value;
   $("modal-input").placeholder = placeholder;
@@ -195,7 +286,11 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
   $("modal-choices").hidden = !choices;
   fill($("modal-choices"), ...(choices || []).map((choice, index) => h("label", { class: "choice" }, [
     h("input", { type: "radio", name: "modal-choice", value: choice.value, checked: index === 0 }),
-    h("span", {}, [h("strong", { text: choice.title }), choice.detail ? h("small", { text: choice.detail }) : null]),
+    h("span", {}, [
+      h("strong", { text: choice.title }),
+      choice.detail ? h("small", { text: choice.detail }) : null,
+      choice.specs ? specList(choice.specs) : null
+    ]),
     choice.aside ? h("span", { class: "price", text: choice.aside }) : null
   ])));
   $("modal-error").textContent = error;
@@ -203,6 +298,7 @@ function ask({ title, description = "", value = "", placeholder = "", confirm, i
   $("modal-confirm").textContent = confirm;
   $("modal-confirm").className = `button ${danger ? "danger" : "primary"}`;
   $("modal").hidden = false;
+  fitModalInput();
   setTimeout(() => (input ? $("modal-input") : $("modal-confirm")).focus(), 0);
   return new Promise(resolve => { settleModal = resolve; });
 }
@@ -224,6 +320,15 @@ function modalResult() {
 $("modal-form").addEventListener("submit", event => { event.preventDefault(); closeModal(modalResult()); });
 $("modal-cancel").addEventListener("click", () => closeModal(null));
 $("modal").addEventListener("click", event => { if (event.target === $("modal")) closeModal(null); });
+// A one-line answer still shows all of a long name: the box grows with what is in it.
+function fitModalInput() {
+  const input = $("modal-input");
+  if (!input.classList.contains("single")) return void (input.style.height = "");
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight + 2}px`;
+}
+$("modal-input").addEventListener("input", fitModalInput);
+
 $("modal-input").addEventListener("keydown", event => {
   if (event.key === "Enter" && ($("modal-input").classList.contains("single") || event.metaKey || event.ctrlKey)) {
     event.preventDefault();

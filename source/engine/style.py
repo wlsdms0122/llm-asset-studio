@@ -29,16 +29,24 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 import workspace
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
-STYLE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
+def style_name(name):
+    """The name in its stored form, or None when it is not a style name: letters of any script with their combining
+    marks, digits, and hyphens, starting with a letter or digit. NFKC folds look-alike forms (full-width "ｄｅｍｏ" is
+    "demo"), and names are lowercase so no two differ only by case on a case-insensitive disk. app.js mirrors this rule."""
+    name = unicodedata.normalize("NFKC", name or "")
+    kinds = [unicodedata.category(character)[0] if character != "-" else "-" for character in name]
+    if not 2 <= len(name) <= 41 or kinds[0] not in "LN" or any(kind not in "LNM-" for kind in kinds) or name != name.lower():
+        return None
+    return name
 
 
 class StyleError(Exception):
@@ -53,9 +61,17 @@ class Style:
 
     @classmethod
     def named(cls, styles, name):
-        if not STYLE_NAME.match(name or ""):
-            raise StyleError("a style name is lowercase letters, digits, and hyphens")
-        return cls(Path(styles) / name)
+        stored = style_name(name)
+        if stored is None:
+            raise StyleError("a style name is two or more letters of any script (lowercase where the script has case), digits, and hyphens")
+        return cls(Path(styles) / stored)
+
+    @classmethod
+    def all(cls, styles):
+        styles = Path(styles)
+        if not styles.is_dir():
+            return []
+        return [cls(path) for path in sorted(styles.iterdir()) if path.is_dir() and not path.name.startswith(".")]
 
     # Locations
 
@@ -171,6 +187,7 @@ class Style:
     def rename(self, name):
         """Rename the style and its sessions, and rewrite every record that names them."""
         target = Style.named(self.path.parent, name)
+        name = target.name
         if target.exists():
             raise StyleError(f"style {name} already exists")
         old = [f"styles/{self.name}/", f"sessions/{self.name}/"]
@@ -228,6 +245,7 @@ class Style:
             "request": made.get("request"),
             "prompt": made.get("prompt"),
             "model": made.get("model"),
+            "tool": made.get("tool"),
             "cost": cost_of(made),
             "time": timestamp()
         })

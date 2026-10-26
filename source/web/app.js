@@ -4,14 +4,13 @@
 
 // ---------- vocabulary ----------
 
-const STAGES = [["discover", "스타일"], ["sample", "샘플"], ["confirm", "확정"]];
-const KIND_NAMES = { discover: "스타일", sample: "샘플", confirm: "확정", generate: "생성", model: "모델 추가" };
-const SESSION_NAMES = { make: "스타일 만들기", generate: "이미지", model: "모델 추가" };
-// A generate session is named by how it goes: making an image from a request, or ideation.
-const sessionName = session => session.ideation ? "아이데이션" : SESSION_NAMES[session.kind];
+const STAGES = [["discover", t("Style")], ["sample", t("Sample")], ["confirm", t("Confirm")]];
+const KIND_NAMES = { discover: t("Style"), sample: t("Sample"), confirm: t("Confirm"), generate: t("Generate"), model: t("Add model") };
+const SESSION_NAMES = { make: t("Making the style"), generate: t("Image"), ideation: t("Ideation"), model: t("Add model") };
+const sessionName = session => SESSION_NAMES[session.kind];
 // What the agent is doing after each answer, shown until the next round arrives.
-const WAITING = { sample: "샘플 준비 중", discover: "대화를 준비하는 중", confirm: "레퍼런스 후보 준비 중", generate: "그리는 중", request: "그리는 중", done: "마무리하는 중", refine: "그리는 중", new: "그리는 중" };
-const CONTINUING = { discover: "답을 읽고 있어요", confirm: "후보를 더 만드는 중" };
+const WAITING = { sample: t("Preparing the sample"), discover: t("Preparing the conversation"), confirm: t("Preparing reference candidates"), generate: t("Drawing"), request: t("Drawing"), done: t("Wrapping up"), refine: t("Drawing"), new: t("Drawing") };
+const CONTINUING = { discover: t("Reading your answer"), confirm: t("Making more candidates") };
 const DRAWING = ["request", "refine", "new"];
 
 // ---------- small helpers ----------
@@ -19,22 +18,25 @@ const DRAWING = ["request", "refine", "new"];
 const money = value => value == null ? "-" : `$${value < 0.01 && value > 0 ? value.toFixed(4) : value.toFixed(3)}`;
 const pad = (number, width = 2) => String(number).padStart(width, "0");
 const shortModel = model => (model || "").split("/").pop();
+const TOOL_NAMES = { cutout: t("Background removal") };
+// What made an image, for its details: a model and what one image cost, or a tool run on this computer.
+const madeWith = item => item.tool ? [t("Tool"), TOOL_NAMES[item.tool]] : [t("Model"), item.model && `${shortModel(item.model)}${item.cost != null ? ` · ${money(item.cost)}` : ""}`];
 const fileName = path => path.split("/").pop();
 
 function when(time) {
   if (!time) return "";
   const date = new Date(time.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
   const minutes = Math.round((Date.now() - date) / 60000);
-  if (minutes < 1) return "방금";
-  if (minutes < 60) return `${minutes}분 전`;
-  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}시간 전`;
-  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+  if (minutes < 1) return t("just now");
+  if (minutes < 60) return t("{n} min ago", { n: minutes });
+  if (minutes < 60 * 24) return t("{n} h ago", { n: Math.round(minutes / 60) });
+  return date.toLocaleDateString(language, { month: "short", day: "numeric" });
 }
 
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(value.error || `요청이 실패했어요 (${response.status})`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(value.error || t("The request failed ({status})", { status: response.status })), { status: response.status });
   return value;
 }
 
@@ -53,6 +55,13 @@ let rendered = null;
 let following = false;
 let archiveData = null;
 let selecting = null;
+// The model list with prices, read once per page load; the server keeps it for a day.
+let catalogModels = null;
+// The composer under the stage lives as long as the round it answers, so what is typed, its height, and its images
+// stay put while the page redraws around it.
+let dockComposer = null;
+// What the stage has shown in this session; anything new after the first drawing comes in with a motion.
+let appeared = { place: null, keys: new Set(), primed: false };
 
 function freshDraft(key = null, picked = []) {
   return { key, picked: new Set(picked), notes: {}, comment: "", request: "" };
@@ -85,6 +94,7 @@ function go() {
   draft = freshDraft();
   panelTab = "work";
   selecting = null;
+  dockComposer = null;
   closeMenu();
   document.querySelectorAll("[data-nav]").forEach(link => link.classList.toggle("on", link.dataset.nav === route.name));
   fill($("view"), );
@@ -121,34 +131,54 @@ async function loadStyle() {
 
 // ---------- user actions on styles and references ----------
 
-const STYLE_NAME = /^[a-z0-9][a-z0-9-]{1,40}$/;
-const NAME_RULE = "영문 소문자, 숫자, 하이픈으로 두 글자 이상 적어 주세요.";
+// The rule of style.py style_name, checked here first so a wrong name is answered in the viewer's language.
+const STYLE_NAME = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}-]{1,40}$/u;
+const NAME_RULE = t("Use two or more letters (lowercase for Latin), digits, and hyphens.");
 
 async function askName({ title, description = "", value = "", confirm, submit }) {
   let error = "";
   for (;;) {
-    const name = await ask({ title, description, value, error, placeholder: "이름, 예: blog-cover", confirm, input: "text" });
+    const name = await ask({ title, description, value, error, placeholder: t("Name, e.g. blog-cover"), confirm, input: "text" });
     if (name == null) return;
     value = name;
-    if (!STYLE_NAME.test(name)) { error = NAME_RULE; continue; }
-    try { return await submit(name); }
-    catch (failure) { error = failure.message.includes("already exists") ? "같은 이름의 스타일이 있어요." : failure.message; }
+    const normalized = name.normalize("NFKC");
+    if (!STYLE_NAME.test(normalized) || normalized !== normalized.toLowerCase()) { error = NAME_RULE; continue; }
+    try { return await submit(normalized); }
+    catch (failure) { error = failure.message.includes("already exists") ? t("A style with this name already exists.") : failure.message; }
   }
 }
 
 function newStyle(base = null) {
   return askName({
-    title: base ? `${base} 바탕의 새 스타일` : "새 스타일",
-    description: base ? "바탕 스타일의 설명과 레퍼런스를 가지고 대화를 시작해요." : "대화로 원하는 스타일을 함께 찾아요.",
-    confirm: "만들기",
+    title: base ? t("New style based on {base}", { base }) : t("New style"),
+    description: base ? t("The conversation starts from the base style's words and references.") : t("Find the style you want together, in conversation."),
+    confirm: t("Create"),
     submit: async name => { const result = await api("/api/styles", { name, base }); location.hash = styleHash(result.style); }
   });
 }
 $("new-style").addEventListener("click", () => newStyle());
+fill($("language"), menuButton("languages", t("Language"), { value: language, options: LANGUAGES.map(([value, label]) => ({ value, label })), onChange: setLanguage }));
+
+// The theme follows the system unless the viewer picks one; index.html applies a saved choice before the page draws.
+const THEMES = [["system", t("System"), "monitor"], ["light", t("Light"), "sun"], ["dark", t("Dark"), "moon"]];
+
+function renderTheme() {
+  const current = document.documentElement.dataset.theme || "system";
+  const shown = THEMES.find(([value]) => value === current);
+  fill($("theme"), menuButton(shown[2], t("Theme"), { value: current, options: THEMES.map(([value, label]) => ({ value, label })), onChange: setTheme }));
+}
+
+function setTheme(theme) {
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("theme", theme); } catch {}
+  renderTheme();
+}
+renderTheme();
 
 function renameStyle(style) {
   return askName({
-    title: "이름 변경", value: style, confirm: "바꾸기",
+    title: t("Rename"), value: style, confirm: t("Change"),
     submit: async name => {
       if (name === style) return;
       await api("/api/styles/rename", { style, name });
@@ -159,7 +189,7 @@ function renameStyle(style) {
 }
 
 async function deleteStyle(style) {
-  const yes = await ask({ title: `${style} 삭제`, description: "스타일과 레퍼런스, 보관함 이미지, 세션이 모두 지워져요. 되돌릴 수 없어요.", confirm: "삭제", input: null, danger: true });
+  const yes = await ask({ title: t("Delete {name}", { name: style }), description: t("The style, its references, archived images, and sessions are all deleted. This cannot be undone."), confirm: t("Delete"), input: null, danger: true });
   if (!yes) return;
   try { await api("/api/styles/delete", { style }); if (route.name === "style") location.hash = "#/"; else load(); }
   catch (error) { toast(error.message, "error"); }
@@ -169,7 +199,7 @@ async function deleteStyle(style) {
 async function addToReferences(style, path) {
   try {
     const result = await api("/api/references/add", { style, path });
-    toast(result.added ? "레퍼런스에 추가했어요" : "이미 레퍼런스에 있어요");
+    toast(result.added ? t("Added to references") : t("Already in references"));
     load();
   } catch (error) {
     toast(error.message, "error");
@@ -177,7 +207,7 @@ async function addToReferences(style, path) {
 }
 
 async function removeReference(path) {
-  try { await api("/api/references/remove", { style: data.style, file: fileName(path) }); toast("레퍼런스에서 뺐어요"); load(); }
+  try { await api("/api/references/remove", { style: data.style, file: fileName(path) }); toast(t("Removed from references")); load(); }
   catch (error) { toast(error.message, "error"); }
 }
 
@@ -235,10 +265,10 @@ document.addEventListener("keydown", event => {
 // ---------- home ----------
 
 function statusPill(summary) {
-  if (summary.kind && summary.waiting) return pill(`${KIND_NAMES[summary.kind]} · 내 차례`, { tone: "accent", dot: "static" });
-  if (summary.working) return pill(summary.kind ? `${KIND_NAMES[summary.kind]} · 작업 중` : "작업 중", { tone: "accent", dot: "live" });
-  if (summary.confirmed) return pill("확정", { tone: "success" });
-  return pill("시작 전");
+  if (summary.kind && summary.waiting) return pill(t("{kind} · your turn", { kind: KIND_NAMES[summary.kind] }), { tone: "accent", dot: "static" });
+  if (summary.working) return pill(summary.kind ? t("{kind} · working", { kind: KIND_NAMES[summary.kind] }) : t("Working"), { tone: "accent", dot: "live" });
+  if (summary.confirmed) return pill(t("Confirmed"), { tone: "success" });
+  return pill(t("Not started"));
 }
 
 // Every page redraws only when what it shows has changed; a redraw on every poll makes the images flicker.
@@ -252,32 +282,32 @@ async function loadHome() {
 }
 
 function renderHome(home) {
-  document.title = "스타일 · Asset Studio";
+  document.title = `${t("Styles")} · Asset Studio`;
   const cards = home.styles.map(summary => h("a", {
     class: "card", href: styleHash(summary.name),
     oncontextmenu: event => {
       event.preventDefault();
       openMenu({ x: event.clientX, y: event.clientY }, [
-        { label: "이름 변경", onClick: () => renameStyle(summary.name) },
-        summary.confirmed ? { label: "이 스타일에서 새 스타일", onClick: () => newStyle(summary.name) } : null,
-        { label: "삭제", onClick: () => deleteStyle(summary.name), danger: true }
+        { label: t("Rename"), onClick: () => renameStyle(summary.name) },
+        summary.confirmed ? { label: t("New style from this one"), onClick: () => newStyle(summary.name) } : null,
+        { label: t("Delete"), onClick: () => deleteStyle(summary.name), danger: true }
       ]);
     }
   }, [
-    summary.cover ? imageFrame(summary.cover, { fit: "fill" }) : h("div", { class: "placeholder", text: "아직 이미지가 없어요" }),
+    summary.cover ? imageFrame(summary.cover, { fit: "fill" }) : h("div", { class: "placeholder", text: t("No images yet") }),
     h("div", { class: "card-body" }, [
       h("div", { class: "card-title" }, [h("strong", { text: summary.name }), statusPill(summary)]),
-      h("p", { class: "card-purpose", text: summary.purpose || "대화로 스타일을 찾는 중이에요." }),
+      h("p", { class: "card-purpose", text: summary.purpose || t("Finding the style in conversation.") }),
       h("div", { class: "card-meta" }, [
-        summary.based_on ? h("span", { text: `${summary.based_on} 바탕` }) : null,
-        summary.archived ? h("span", { text: `보관 ${summary.archived}` }) : null
+        summary.based_on ? h("span", { text: t("Based on {base}", { base: summary.based_on }) }) : null,
+        summary.archived ? h("span", { text: t("{count} archived", { count: summary.archived }) }) : null
       ])
     ])
   ]));
 
   fill($("view"), h("div", { class: "page", id: "home" }, [
-    h("div", { class: "page-head" }, [h("div", {}, [h("h1", { text: "스타일" }), h("p", { text: `${home.styles.length}개의 스타일` })])]),
-    cards.length ? h("div", { class: "cards" }, cards) : emptyState({ title: "첫 스타일을 만들어 보세요", text: "원하는 그림을 대화로 설명하면 스타일을 함께 정리해 드려요.", action: button("새 스타일", { variant: "primary", onClick: () => newStyle() }) })
+    h("div", { class: "page-head" }, [h("div", {}, [h("h1", { text: t("Styles") }), h("p", { text: tn("{count} style", "{count} styles", home.styles.length) })])]),
+    cards.length ? h("div", { class: "cards" }, cards) : emptyState({ title: t("Make your first style"), text: t("Describe the pictures you want in conversation, and the style is written down together."), action: button(t("New style"), { variant: "primary", onClick: () => newStyle() }) })
   ]));
 }
 
@@ -300,16 +330,16 @@ function lightboxFromArchive(item) {
     path: item.file,
     name: `${item.style}-${fileName(item.file)}`,
     add: { style: item.style, path: item.file },
-    info: [["스타일", item.style], ["요청", item.request], ["모델", item.model && `${shortModel(item.model)}${item.cost != null ? ` · ${money(item.cost)}` : ""}`], ["프롬프트", item.prompt, true], ["만든 시각", item.time && item.time.replace("T", " ").slice(0, 16)]]
+    info: [[t("Style"), item.style], [t("Request"), item.request], madeWith(item), [t("Prompt"), item.prompt, true], [t("Made at"), item.time && item.time.replace("T", " ").slice(0, 16)]]
   };
 }
 
 // Choosing images only toggles classes and the bar, so the grid's images are never rebuilt (rebuilding them flickers).
 function renderArchive() {
-  document.title = "보관함 · Asset Studio";
+  document.title = `${t("Archive")} · Asset Studio`;
   const { all, shown } = archiveItems();
   const items = shown.map(lightboxFromArchive);
-  const chips = [chip(`전체 ${all.length}`, { on: !route.filter, onClick: () => { location.hash = "#/archive"; } }),
+  const chips = [chip(t("All {count}", { count: all.length }), { on: !route.filter, onClick: () => { location.hash = "#/archive"; } }),
     ...archiveData.styles.map(shelf => chip(`${shelf.style} ${shelf.items.length}`, { on: route.filter === shelf.style, onClick: () => { location.hash = `#/archive/${encodeURIComponent(shelf.style)}`; } }))];
 
   const tiles = shown.map((item, index) => {
@@ -319,8 +349,8 @@ function renderArchive() {
         fit: "fill", check: true,
         onClick: () => selecting ? toggleArchivePick(key) : openLightbox(items, index),
         tools: [
-          tool("reference", "레퍼런스에 추가", () => addToReferences(item.style, item.file)),
-          tool("download", "다운로드", null, { href: fileUrl(item.file), download: `${item.style}-${fileName(item.file)}` })
+          tool("reference", t("Add to references"), () => addToReferences(item.style, item.file)),
+          tool("download", t("Download"), null, { href: fileUrl(item.file), download: `${item.style}-${fileName(item.file)}` })
         ]
       }),
       h("figcaption", {}, [h("span", { text: item.request || "" }), h("span", { text: item.style })])
@@ -329,11 +359,11 @@ function renderArchive() {
 
   fill($("view"), h("div", { class: "page" }, [
     h("div", { class: "page-head" }, [
-      h("div", {}, [h("h1", { text: "보관함" }), h("p", { text: "스타일로 만든 이미지와 레퍼런스가 모두 여기에 모여요." })]),
-      shown.length ? button(selecting ? "선택 취소" : "선택", { onClick: event => setSelecting(!selecting, event.currentTarget) }) : null
+      h("div", {}, [h("h1", { text: t("Archive") }), h("p", { text: t("Every image made with a style, and every reference, is kept here.") })]),
+      shown.length ? button(selecting ? t("Cancel selection") : t("Select"), { onClick: event => setSelecting(!selecting, event.currentTarget) }) : null
     ]),
     all.length ? h("div", { class: "chips" }, chips) : null,
-    shown.length ? h("div", { class: `grid${selecting ? " selecting" : ""}`, id: "archive-grid" }, tiles) : h("div", { id: "archive-grid" }, [emptyState({ title: "아직 보관된 이미지가 없어요", text: "확정한 스타일로 이미지를 만들면 여기에 자동으로 모여요." })]),
+    shown.length ? h("div", { class: `grid${selecting ? " selecting" : ""}`, id: "archive-grid" }, tiles) : h("div", { id: "archive-grid" }, [emptyState({ title: t("Nothing archived yet"), text: t("Images made with a confirmed style are kept here automatically.") })]),
     h("div", { id: "selection-bar" })
   ]));
   syncArchiveSelection();
@@ -341,7 +371,7 @@ function renderArchive() {
 
 function setSelecting(on, trigger) {
   selecting = on ? new Set() : null;
-  trigger.querySelector("span").textContent = on ? "선택 취소" : "선택";
+  trigger.querySelector("span").textContent = on ? t("Cancel selection") : t("Select");
   $("archive-grid").classList.toggle("selecting", on);
   syncArchiveSelection();
 }
@@ -357,10 +387,10 @@ function syncArchiveSelection() {
   const bar = $("selection-bar");
   if (!selecting) return fill(bar, );
   fill(bar, h("div", { class: "selection-bar" }, [
-    h("span", { text: `${selecting.size}장 선택` }),
+    h("span", { text: tn("{count} selected", "{count} selected", selecting.size) }),
     h("div", { class: "row" }, [
-      button("전체 선택", { onClick: () => { archiveItems().shown.forEach(item => selecting.add(`${item.style}/${item.file}`)); syncArchiveSelection(); } }),
-      button("다운로드", { variant: "primary", iconName: "download", disabled: !selecting.size, onClick: downloadSelected })
+      button(t("Select all"), { onClick: () => { archiveItems().shown.forEach(item => selecting.add(`${item.style}/${item.file}`)); syncArchiveSelection(); } }),
+      button(t("Download"), { variant: "primary", iconName: "download", disabled: !selecting.size, onClick: downloadSelected })
     ])
   ]));
 }
@@ -370,7 +400,7 @@ async function downloadSelected() {
   const files = all.filter(item => selecting.has(`${item.style}/${item.file}`)).map(item => ({ path: item.file, name: `${item.style}-${fileName(item.file)}` }));
   try {
     const response = await fetch("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files }) });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "다운로드하지 못했어요");
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || t("Could not download"));
     const link = h("a", { href: URL.createObjectURL(await response.blob()), download: `asset-studio-${files.length}.zip` });
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 10000);
@@ -382,7 +412,7 @@ async function downloadSelected() {
 // ---------- style page ----------
 
 function renderMissing(message) {
-  fill($("view"), h("div", { class: "page" }, [emptyState({ title: "스타일을 열 수 없어요", text: message, action: h("a", { class: "button", href: "#/", text: "스타일 목록으로" }) })]));
+  fill($("view"), h("div", { class: "page" }, [emptyState({ title: t("Cannot open the style"), text: message, action: h("a", { class: "button", href: "#/", text: t("Back to styles") }) })]));
 }
 
 function renderStyle() {
@@ -403,16 +433,25 @@ function renderStyle() {
         h("div", { class: "panel-body", id: "panel-body" }),
         h("div", { class: "panel-doc", id: "panel-doc", hidden: true }, [h("pre", { class: "document" })]),
         h("div", { class: "panel-actions", id: "panel-actions" }),
-        h("div", { class: "panel-resize", id: "panel-resize", title: "드래그해서 너비 조절" })
+        h("div", { class: "panel-resize", id: "panel-resize", title: t("Drag to resize") })
       ]),
-      h("section", { class: "stage", id: "stage", onscroll: syncLatestButton }, [
-        h("div", { class: "stage-inner", id: "stage-inner" }),
-        h("button", { class: "latest", id: "latest", type: "button", hidden: true, html: `${icon("down")}<span>새 메시지</span>`, onclick: () => scrollToLatest(true) })
+      h("div", { class: "stage-column" }, [
+        h("section", { class: "stage", id: "stage", onscroll: syncLatestButton }, [
+          h("div", { class: "stage-inner", id: "stage-inner" }),
+          h("button", { class: "latest", id: "latest", type: "button", hidden: true, html: `${icon("down")}<span>${t("New messages")}</span>`, onclick: () => scrollToLatest(true) })
+        ]),
+        h("div", { class: "dock", id: "dock" })
       ])
     ]));
     bindResize();
     // Load events do not bubble, so the stage listens in the capture phase.
     $("stage").addEventListener("load", event => { if (following && event.target.tagName === "IMG") $("stage").scrollTop = $("stage").scrollHeight; }, true);
+    // The stage keeps room for the composer floating over it; while the composer grows or shrinks, a stage following
+    // the newest content stays on it.
+    new ResizeObserver(() => {
+      $("stage").style.setProperty("--dock", `${$("dock").offsetHeight}px`);
+      if (following) $("stage").scrollTop = $("stage").scrollHeight;
+    }).observe($("dock"));
   }
 
   renderPanelHead();
@@ -454,17 +493,19 @@ function renderPanelHead() {
   const session = data.session;
   const stage = current && session.kind === "make" ? STAGES.findIndex(([name]) => name === current.kind) : -1;
   const pills = [];
-  if (overview.confirmed && !session) pills.push(pill("확정", { tone: "success" }));
+  if (overview.confirmed && !session) pills.push(pill(t("Confirmed"), { tone: "success" }));
   const model = session ? (current ? (current.blind ? "" : current.model) : session.model) : overview.model;
   if (model) pills.push(pill(shortModel(model)));
-  if (overview.based_on && !session) pills.push(pill(`${overview.based_on} 바탕`));
-  if (current && current.session_cost > 0) pills.push(pill(`비용 ${money(current.session_cost)}`));
+  if (overview.based_on && !session) pills.push(pill(t("Based on {base}", { base: overview.based_on })));
+  if (current && current.session_cost > 0) pills.push(pill(t("Cost {cost}", { cost: money(current.session_cost) })));
   const inSession = session && session.kind !== "make";
 
   fill($("panel-head"),
-    h("a", { class: "back", href: inSession ? styleHash(data.style) : "#/", text: inSession ? `← ${data.style}` : "← 스타일" }),
-    h("h1", { text: inSession ? session.title || sessionName(session) : data.style }),
-    inSession ? h("p", { class: "subtitle", text: `${sessionName(session)} 세션 · ${when(session.started)} 시작` }) : null,
+    button(inSession ? data.style : t("Styles"), { small: true, iconName: "previous", title: t("Back"), class: "back", onClick: () => { location.hash = inSession ? styleHash(data.style) : "#/"; } }),
+    inSession
+      ? h("div", { class: "title-row" }, [h("h1", { text: session.title || sessionName(session) }), tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true })])
+      : h("h1", { text: data.style }),
+    inSession ? h("p", { class: "subtitle", text: t("{kind} session · started {when}", { kind: sessionName(session), when: when(session.started) }) }) : null,
     session && session.kind === "make" ? h("div", { class: "stepper" }, STAGES.map(([, name], index) => h("div", { class: `step${index < stage ? " done" : index === stage ? " now" : ""}`, text: name }))) : null,
     pills.length ? h("div", { class: "facts" }, pills) : null
   );
@@ -473,14 +514,14 @@ function renderPanelHead() {
 // The documents shown with this view: the round's copies while it is open, the style's own otherwise.
 function documents() {
   const source = view() || data.overview;
-  return [["brief", "브리프", source.brief], ["spec", "스타일", source.spec], ["prompting", "프롬프트", source.prompting]].filter(([, , text]) => text);
+  return [["brief", t("Brief"), source.brief], ["spec", t("Style"), source.spec], ["prompting", t("Prompt"), source.prompting]].filter(([, , text]) => text);
 }
 
 function renderTabs() {
   const docs = documents();
   if (!docs.some(([key]) => key === panelTab)) panelTab = "work";
   $("tabs").hidden = !docs.length;
-  fill($("tabs"), ...[["work", data.session ? "작업" : "개요"], ...docs].map(([key, label]) => h("button", {
+  fill($("tabs"), ...[["work", data.session ? t("Work") : t("Overview")], ...docs].map(([key, label]) => h("button", {
     class: `tab${key === panelTab ? " on" : ""}`, type: "button", text: label,
     onclick: () => { panelTab = key; renderTabs(); }
   })));
@@ -497,15 +538,16 @@ function renderPanelBody() {
   const current = view();
   const body = $("panel-body");
   const actions = $("panel-actions");
+  if (!answering()) { dockComposer = null; fill($("dock"), ); }
   if (!data.session) return renderIdlePanel(body, actions);
   if (!current) {
-    fill(body, workingNote(data.session.kind === "model" ? "이 모델에 맞춘 프롬프트 가이드를 만드는 중" : "준비하고 있어요"));
+    fill(body, workingNote(data.session.kind === "model" ? t("Writing the prompt guide for this model") : t("Getting ready")));
     fill(actions, );
     return;
   }
   if (!answering()) {
     const decision = current.feedback.decision;
-    fill(body, workingNote(WAITING[decision] || CONTINUING[current.kind] || "다음 화면을 준비하고 있어요"));
+    fill(body, workingNote(WAITING[decision] || CONTINUING[current.kind] || t("Preparing the next step")));
     fill(actions, );
     return;
   }
@@ -516,60 +558,76 @@ function renderPanelBody() {
 function renderIdlePanel(body, actions) {
   const overview = data.overview;
   if (!overview.confirmed) {
-    fill(body, h("h2", { text: "열린 세션이 없어요" }));
+    fill(body, h("h2", { text: t("No open session") }));
     fill(actions, );
     return;
   }
   const sessions = data.sessions.filter(session => session.kind !== "make").sort((a, b) => b.updated.localeCompare(a.updated));
   fill(body,
-    h("h2", { text: "이 스타일로 이미지를 만들어요" }),
-    h("p", { class: "lead", text: "새 이미지는 적은 대로 바로 그리고, 새 아이데이션은 무엇을 그릴지 대화로 함께 정해요. 만든 이미지는 보관함에 모여요." }),
+    h("h2", { text: t("Make images in this style") }),
+    h("p", { class: "lead", text: t("A new image is drawn straight from what you write; a new ideation works out what to draw in conversation. Images you make are kept in the archive.") }),
     h("dl", { class: "facts-list" }, [
-      h("div", {}, [h("dt", { text: "레퍼런스" }), h("dd", { text: `${overview.references.length}장` })]),
-      h("div", {}, [h("dt", { text: "보관한 이미지" }), h("dd", { text: `${data.archive.length}장` })]),
-      overview.based_on ? h("div", {}, [h("dt", { text: "바탕 스타일" }), h("dd", { text: overview.based_on })]) : null
+      h("div", {}, [h("dt", { text: t("References") }), h("dd", { text: tn("{count} image", "{count} images", overview.references.length) })]),
+      h("div", {}, [h("dt", { text: t("Archived images") }), h("dd", { text: tn("{count} image", "{count} images", data.archive.length) })]),
+      overview.based_on ? h("div", {}, [h("dt", { text: t("Base style") }), h("dd", { text: overview.based_on })]) : null
     ]),
-    sectionTitle("모델", button("모델 추가", { small: true, onClick: addModel })),
-    rowList(overview.models.map(modelRow)),
-    sectionTitle("세션", sessions.length ? `${sessions.length}개` : ""),
-    sessions.length ? rowList(sessions.map(sessionRow)) : h("p", { class: "muted", text: "아직 세션이 없어요." })
+    sectionTitle(t("Models"), button(t("Add model"), { small: true, onClick: addModel })),
+    h("div", { id: "model-rows" }, [rowList(overview.models.map(modelRow))]),
+    sectionTitle(t("Sessions"), sessions.length ? String(sessions.length) : ""),
+    sessions.length ? rowList(sessions.map(sessionRow)) : h("p", { class: "muted", text: t("No sessions yet.") })
   );
-  const image = button("새 이미지", { variant: "primary", grow: true });
+  const image = button(t("New image"), { variant: "primary", grow: true });
   image.addEventListener("click", () => openSession("generate", null, image));
-  const ideation = button("새 아이데이션", { grow: true });
-  ideation.addEventListener("click", () => openSession("generate", null, ideation, true));
+  const ideation = button(t("New ideation"), { grow: true });
+  ideation.addEventListener("click", () => openSession("ideation", null, ideation));
   fill(actions, ideation, image);
+  if (!catalogModels) loadCatalog().then(() => { if ($("model-rows")) fill($("model-rows"), rowList(data.overview.models.map(modelRow))); }).catch(() => {});
 }
 
 // A row per model: choosing one makes it the model in use; any other can be removed.
 function modelRow(model) {
   const inUse = model === data.overview.model;
+  const listed = catalogModels && catalogModels.find(each => each.id === model);
   return listRow({
-    title: shortModel(model), detail: model, current: inUse, hint: inUse ? null : "이 모델로 그리기", onClick: () => useModel(model),
-    aside: inUse ? pill("사용 중", { tone: "success" }) : tool("trash", "모델 삭제", () => removeModel(model), { quiet: true })
+    title: shortModel(model), detail: model, specs: listed ? modelSpecs(listed) : null, current: inUse, hint: inUse ? null : t("Draw with this model"), onClick: () => useModel(model),
+    aside: inUse ? pill(t("In use"), { tone: "success" }) : tool("trash", t("Delete model"), () => removeModel(model), { quiet: true, danger: true })
   });
 }
 
 async function removeModel(model) {
-  const yes = await ask({ title: "모델 삭제", description: `${shortModel(model)}와 이 스타일용 프롬프트 가이드를 지워요. 이 모델로 만든 이미지는 보관함에 그대로 있어요.`, confirm: "삭제", input: null, danger: true });
+  const yes = await ask({ title: t("Delete model"), description: t("Deletes {model} and its prompt guide for this style. Images made with it stay in the archive.", { model: shortModel(model) }), confirm: t("Delete"), input: null, danger: true });
   if (!yes) return;
-  try { await api("/api/models/delete", { style: data.style, model }); toast("모델을 지웠어요"); load(); }
+  try { await api("/api/models/delete", { style: data.style, model }); toast(t("Model deleted")); load(); }
   catch (error) { toast(error.message, "error"); }
 }
 
 function sessionRow(session) {
   return listRow({
-    title: session.title || (session.kind === "generate" ? `새 ${sessionName(session)}` : SESSION_NAMES[session.kind]),
+    title: session.title || (session.kind === "model" ? SESSION_NAMES.model : t("New {kind}", { kind: sessionName(session) })),
     detail: `${sessionName(session)} · ${when(session.updated)}`,
     onClick: () => { location.hash = styleHash(data.style, session.id); },
-    aside: h("div", { class: "row" }, [session.waiting ? null : pill("작업 중", { tone: "accent", dot: "live" }), tool("trash", "세션 삭제", () => deleteSession(session), { quiet: true })])
+    aside: h("div", { class: "row" }, [
+      session.waiting ? null : pill(t("Working"), { tone: "accent", dot: "live" }),
+      tool("pencil", t("Rename session"), () => renameSession(session), { quiet: true }),
+      tool("trash", t("Delete session"), () => deleteSession(session), { quiet: true, danger: true })
+    ])
   });
 }
 
-async function openSession(sessionKind, model, trigger, ideation = false) {
+async function renameSession(session) {
+  let error = "";
+  for (;;) {
+    const name = await ask({ title: t("Rename session"), value: session.title || "", error, placeholder: t("Name"), confirm: t("Change"), input: "text" });
+    if (name == null || name === (session.title || "")) return;
+    try { await api("/api/sessions/rename", { style: data.style, session: session.id, name }); data = null; return load(); }
+    catch (failure) { error = failure.message; }
+  }
+}
+
+async function openSession(sessionKind, model, trigger) {
   if (trigger) trigger.disabled = true;
   try {
-    const opened = await api("/api/sessions", { style: data.style, kind: sessionKind, model, ideation });
+    const opened = await api("/api/sessions", { style: data.style, kind: sessionKind, model });
     location.hash = styleHash(data.style, opened.session);
   } catch (error) {
     toast(error.message, "error");
@@ -578,7 +636,7 @@ async function openSession(sessionKind, model, trigger, ideation = false) {
 }
 
 async function deleteSession(session) {
-  const yes = await ask({ title: "세션 삭제", description: session.kind === "model" ? "이 모델 추가를 그만두고 기록을 지워요." : "세션 기록을 지워요. 만든 이미지는 보관함에 그대로 있어요.", confirm: "삭제", input: null, danger: true });
+  const yes = await ask({ title: t("Delete session"), description: session.kind === "model" ? t("Stops adding this model and deletes its records.") : t("Deletes the session's records. Images made in it stay in the archive."), confirm: t("Delete"), input: null, danger: true });
   if (!yes) return;
   try {
     await api("/api/sessions/delete", { style: data.style, session: session.id });
@@ -588,25 +646,48 @@ async function deleteSession(session) {
 }
 
 async function useModel(model) {
-  try { await api("/api/model", { style: data.style, model }); toast(`${shortModel(model)}로 그려요`); load(); }
+  try { await api("/api/model", { style: data.style, model }); toast(t("Drawing with {model}", { model: shortModel(model) })); load(); }
   catch (error) { toast(error.message, "error"); }
 }
 
-// What one image costs: measured here when it has been used, else the listed price by its billing unit.
+// What one output image is listed at on OpenRouter, by its billing unit.
 function priceLabel(model) {
-  if (model.measured != null) return `${money(model.measured)} / 장`;
   const price = model.price;
-  if (!price || price.cost == null) return "가격 정보 없음";
-  if (price.cost === 0) return "무료";
-  const from = price.varies ? "부터" : "";
-  if (price.unit === "image") return `${money(price.cost)} / 장${from}`;
-  if (price.unit === "megapixel") return `1K 약 ${money(price.cost * 1.05)} / 장${from}`;
-  return `토큰 과금 ($${(price.cost * 1e6).toFixed(0)}/100만)`;
+  if (!price || price.cost == null) return t("No price listed");
+  if (price.cost === 0) return t("Free");
+  const from = price.varies ? t(" and up") : "";
+  if (price.unit === "image") return t("{cost} / image", { cost: money(price.cost) }) + from;
+  if (price.unit === "megapixel") return t("About {cost} / 1K image", { cost: money(price.cost * 1.05) }) + from;
+  return t("{cost} / 1M tokens", { cost: `$${+(price.cost * 1e6).toFixed(2)}` }) + from;
+}
+
+// What a model is, as OpenRouter lists it: the price of one image, how it is billed, and the references it takes.
+function modelSpecs(model) {
+  return [
+    [t("Price"), priceLabel(model)],
+    billingLabel(model) ? [t("Billing"), billingLabel(model)] : null,
+    [t("References"), t("Up to {count}", { count: model.references })],
+    model.price && model.price.reference ? [t("Per reference"), money(model.price.reference)] : null
+  ];
+}
+
+// Whether one image always costs the same: a flat price per image, or one that changes with the options, the size, or the tokens.
+function billingLabel(model) {
+  const price = model.price;
+  if (!price || !price.cost) return null;
+  if (price.unit === "image") return price.varies ? t("Changes with options") : t("Fixed per image");
+  if (price.unit === "megapixel") return t("Changes with size");
+  return t("Changes with tokens");
+}
+
+async function loadCatalog() {
+  if (!catalogModels) catalogModels = (await api("/api/catalog")).models;
+  return catalogModels;
 }
 
 async function addModel() {
   let catalog;
-  try { catalog = (await api("/api/catalog")).models; }
+  try { catalog = await loadCatalog(); }
   catch (error) { return toast(error.message, "error"); }
   // A style draws with all its references attached, so only models that take that many are offered; one already being added is not offered twice.
   const adding = data.sessions.filter(session => session.kind === "model").map(session => session.model);
@@ -614,133 +695,137 @@ async function addModel() {
   const choices = catalog.filter(model => model.references >= needed && !data.overview.models.includes(model.id) && !adding.includes(model.id))
     .sort((a, b) => (b.created || 0) - (a.created || 0))
     .map(model => ({
-      value: model.id, title: model.name, aside: priceLabel(model),
-      detail: [model.id, `레퍼런스 ${model.references}장까지`, model.measured != null ? "실측" : null, model.price && model.price.reference ? `레퍼런스 장당 ${money(model.price.reference)}` : null].filter(Boolean).join(" · ")
+      value: model.id, title: model.name, detail: model.id, specs: modelSpecs(model)
     }));
-  const model = await ask({ title: "모델 추가", description: "고르면 이 모델에 맞는 프롬프트 가이드를 만들고, 몇 장 그려 보면서 다듬어요. 가격은 1K 한 장 기준이에요.", confirm: "추가 시작", input: null, choices });
+  const model = await ask({ title: t("Add model"), description: t("Choosing one writes a prompt guide for it, refined over a few drawings."), confirm: t("Start adding"), input: null, choices });
   if (model) openSession("model", model);
 }
 
-// The bottom of the panel: the text box, then the images attached to this answer under it.
-function composer(key, placeholder, { attaching = true, hint = "보내기", onInput = null } = {}) {
-  const input = h("textarea", { class: "text-input", placeholder, value: draft[key] });
-  input.addEventListener("input", () => { draft[key] = input.value; if (onInput) onInput(); });
-  input.addEventListener("keydown", event => {
-    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
-    event.preventDefault();
-    const primary = $("panel-actions").querySelector(".button.primary");
-    if (primary && !primary.disabled) primary.click();
-  });
+// The message box under the stage, docked once per round: the text, the images that go with the answer, and send.
+// The draft field it writes is the request on boards and the reply in conversations.
+function answerBox(placeholder, { attaching = true, sendTitle, onSend }) {
   const current = view();
-  const attached = attaching && current.attachments.length ? h("div", { class: "thumbs" }, current.attachments.map(path => thumb(path, { remove: () => detach(path) }))) : null;
-  return h("div", { class: "composer" }, [input, attached, h("div", { class: "hint" }, [h("span", { text: attaching ? "이미지를 첨부하면 이 답과 함께 보내져요" : "" }), h("span", { text: `⌘↵ ${hint}` })])]);
+  const field = draftField();
+  const key = `${draftKey(current)}|${field}`;
+  if (!dockComposer || dockComposer.key !== key) {
+    dockComposer = composer({
+      value: draft[field], placeholder, sendTitle: `${sendTitle} (⌘↵)`, onSend,
+      onInput: value => { draft[field] = value; syncSend(); },
+      attach: attaching ? attachButton() : null
+    });
+    dockComposer.key = key;
+  }
+  if ($("dock").firstElementChild !== dockComposer) fill($("dock"), dockComposer);
+  syncComposerImages();
+  syncSend();
+  return dockComposer;
+}
+
+const draftField = () => ["discover", "confirm"].includes(kind()) ? "comment" : "request";
+
+// The images that go with the answer: the attempt or candidates picked, each with its number, then the attachments.
+function syncComposerImages() {
+  if (!dockComposer) return;
+  const current = view();
+  const picks = ["discover", "generate"].includes(kind()) ? current.candidates.filter(candidate => draft.picked.has(candidate.number)) : [];
+  dockComposer.setImages([
+    ...picks.map(candidate => ({ key: `pick|${candidate.path}`, node: thumb(candidate.path, { picked: true, badge: pad(candidate.number), title: t("No. {number}", { number: pad(candidate.number) }), remove: () => togglePick(candidate.number) }) })),
+    ...current.attachments.map(path => ({ key: `attachment|${path}`, node: thumb(path, { remove: () => detach(path) }) }))
+  ]);
+}
+
+// Whether the answer can be sent follows what is written and picked.
+function syncSend() {
+  if (!dockComposer || !view()) return;
+  const current = view();
+  if (kind() === "discover") dockComposer.send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !current.attachments.length;
+  else dockComposer.send.disabled = !draft[draftField()].trim();
 }
 
 function attachButton() {
-  return uploadButton("이미지 첨부", async files => {
+  return uploadButton(t("Attach images"), async files => {
     for (const file of files) {
       try { await api("/api/attach", { style: data.style, session: data.session.id, name: file.name, data: await readFile(file) }); }
       catch (error) { toast(error.message, "error"); }
     }
     await load();
-  });
+  }, { variant: "ghost" });
 }
 
 async function detach(path) {
   try { await api("/api/detach", { style: data.style, session: data.session.id, path }); await load(); }
-  catch { toast("이미지를 빼지 못했어요. 새로고침 후 다시 해 주세요.", "error"); }
+  catch { toast(t("Could not remove the image. Reload and try again."), "error"); }
 }
 
-// The talk of a make session writes the style; ideation in a generate session writes the image's brief.
+// The talk of a make session writes the style; an ideation session writes the image's brief.
 function discoverPanel(current, body, actions) {
-  const imageTalk = data.session.kind === "generate";
+  const imageTalk = data.session.kind === "ideation";
   const written = imageTalk ? current.brief : current.spec;
-  const lead = current.candidates.length ? "마음에 드는 이미지를 고르고, 이미지마다 메모를 남길 수 있어요." : written ? `제가 정리한 ${imageTalk ? "브리프와" : "설명과"} 다르면 편하게 고쳐 주세요.` : null;
-  const send = button("보내기", { variant: "primary", grow: true, onClick: () => submit(null) });
-  const next = imageTalk ? ["생성", "generate"] : ["샘플", "sample"];
+  const lead = current.candidates.length ? t("Pick the images you like; each can carry a note.") : written ? (imageTalk ? t("If the brief I wrote is off, just correct it.") : t("If the description I wrote is off, just correct it.")) : null;
+  const next = imageTalk ? [t("Generate"), "generate"] : [t("Sample"), "sample"];
   fill(body,
-    h("h2", { text: imageTalk ? (written ? "브리프가 맞는지 봐 주세요" : "어떤 이미지가 필요한지 알려 주세요") : written ? "설명이 맞는지 봐 주세요" : "원하는 스타일을 알려 주세요" }),
-    lead ? h("p", { class: "lead", text: lead }) : null,
-    composer("comment", imageTalk ? "예: 앱 아이콘인데 무엇을 그릴지 아직 모르겠어요" : "예: 조금 더 부드럽고 단순했으면 좋겠어요", { onInput: syncSend })
+    h("h2", { text: imageTalk ? (written ? t("Check the brief") : t("Tell me what image you need")) : written ? t("Check the description") : t("Tell me the style you want") }),
+    lead ? h("p", { class: "lead", text: lead }) : null
   );
-  fill(actions, attachButton(), send, written ? button(next[0], { variant: "success", onClick: () => submit(next[1]) }) : null);
-  syncSend();
-}
-
-// A discover answer can be words, picks, notes, or attachments; any one of them is enough to send.
-function syncSend() {
-  const send = kind() === "discover" ? $("panel-actions").querySelector(".button.primary") : null;
-  if (send) send.disabled = !draft.comment.trim() && !draft.picked.size && !Object.keys(draft.notes).length && !view().attachments.length;
+  fill(actions, written ? button(next[0], { variant: "success", grow: true, onClick: () => submit(next[1]) }) : null);
+  answerBox(imageTalk ? t("e.g. An app icon, but I don't know what to draw yet") : t("e.g. A little softer and simpler"), { sendTitle: t("Send"), onSend: () => submit(null) });
 }
 
 function samplePanel(current, body, actions) {
-  const generate = button("그리기", { variant: "primary", grow: true, onClick: () => submit("request") });
-  const update = () => { generate.disabled = !draft.request.trim(); };
+  answerBox(t("e.g. A mug by the window on a rainy day"), { sendTitle: t("Draw"), onSend: () => submit("request") });
   fill(body,
-    h("h2", { text: "이 스타일로 그려 보세요" }),
-    h("p", { class: "lead", text: current.unit_cost != null ? `한 장에 ${money(current.unit_cost)}` : "적은 것을 한 장씩 그려 드려요." }),
-    composer("request", "예: 비 오는 날 창가에 놓인 머그잔", { onInput: update, hint: "그리기" })
+    h("h2", { text: t("Try drawing in this style") }),
+    h("p", { class: "lead", text: current.unit_cost != null ? t("{cost} an image", { cost: money(current.unit_cost) }) : t("What you write is drawn one image at a time.") })
   );
-  update();
-  fill(actions, button("스타일", { onClick: () => submit("discover", draft.request) }), attachButton(), generate, button("확정", { variant: "success", hidden: !current.candidates.length, onClick: () => submit("confirm") }));
+  fill(actions, button(t("Style"), { grow: true, onClick: () => submit("discover", draft.request) }), button(t("Confirm"), { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("confirm") }));
 }
 
 function confirmPanel(current, body, actions) {
-  const send = button("보내기", { variant: "primary", onClick: () => submit(null) });
-  const update = () => { send.disabled = !draft.comment.trim(); };
+  answerBox(t("Anything more you want to see? e.g. One or two more subjects"), { attaching: false, sendTitle: t("Send"), onSend: () => submit(null) });
   fill(body,
-    h("h2", { text: "레퍼런스로 쓸 이미지를 골라 주세요" }),
-    h("p", { class: "lead", id: "selection-count" }),
-    composer("comment", "더 보고 싶은 게 있으면 적어 주세요. 예: 다른 대상도 한두 장 더", { attaching: false, onInput: update })
+    h("h2", { text: t("Pick the images to use as references") }),
+    h("p", { class: "lead", id: "selection-count" })
   );
-  fill(actions, button("샘플", { onClick: () => submit("sample", draft.comment) }), send, button("확정", { variant: "success", grow: true, onClick: () => submit("done") }));
-  update();
+  fill(actions, button(t("Sample"), { onClick: () => submit("sample", draft.comment) }), button(t("Confirm"), { variant: "success", grow: true, onClick: () => submit("done") }));
   syncSelection();
 }
 
 function generatePanel(current, body, actions) {
   const started = current.candidates.length > 0;
-  const generate = button("생성", { variant: "primary", grow: true, onClick: () => submit(draft.picked.size ? "refine" : "new") });
-  const fresh = iconButton("plus", "새로 그리기", () => submit("new"), { hidden: !started });
-  const update = () => { generate.disabled = fresh.disabled = !draft.request.trim(); };
   fill(body,
-    h("h2", { text: started ? "고르고, 어떻게 바꿀지 적어 주세요" : "무엇을 만들까요?" }),
-    h("p", { class: "lead", id: "selection-count", text: started ? "" : "만든 이미지는 보관함에 자동으로 모여요." }),
-    composer("request", started ? "예: 손잡이를 더 크게" : "예: 노트북 앞의 커피잔", { onInput: update, hint: "생성" })
+    h("h2", { text: started ? t("Pick one and write what to change") : t("What shall we make?") }),
+    h("p", { class: "lead", id: "selection-count", text: started ? "" : t("Images you make are kept in the archive automatically.") })
   );
-  update();
-  fill(actions, button("아이데이션", { onClick: () => submit("discover", draft.request) }), attachButton(), fresh, generate);
+  fill(actions, );
+  answerBox(started ? t("e.g. A bigger handle") : t("e.g. A coffee cup in front of a laptop"), { sendTitle: t("Generate"), onSend: () => submit(draft.picked.size ? "refine" : "new") });
   syncSelection();
 }
 
 function modelPanel(current, body, actions) {
-  const generate = button("그리기", { variant: "primary", grow: true, onClick: () => submit("request") });
-  const update = () => { generate.disabled = !draft.request.trim(); };
+  answerBox(t("e.g. A monstera by the window"), { sendTitle: t("Draw"), onSend: () => submit("request") });
   fill(body,
-    h("h2", { text: `${shortModel(current.model)}로 그려 보세요` }),
-    h("p", { class: "lead", text: "레퍼런스를 붙여 한 장씩 그려요. 이 스타일답게 나오면 추가를 눌러 주세요." }),
-    composer("request", "예: 창가의 몬스테라", { onInput: update, hint: "그리기" })
+    h("h2", { text: t("Try drawing with {model}", { model: shortModel(current.model) }) }),
+    h("p", { class: "lead", text: t("Each image is drawn with the references attached. When it looks like this style, press Add.") })
   );
-  update();
-  fill(actions, attachButton(), generate, button("추가", { variant: "success", hidden: !current.candidates.length, onClick: () => submit("done") }));
+  fill(actions, button(t("Add"), { variant: "success", grow: true, hidden: !current.candidates.length, onClick: () => submit("done") }));
 }
 
 // What the picks mean for the next step, kept in step with the cards.
 function syncSelection() {
   const count = $("selection-count");
   if (kind() === "confirm") {
-    if (count) count.textContent = draft.picked.size ? `${draft.picked.size}장 골랐어요. 대상과 색이 다양할수록 좋아요.` : "";
+    if (count) count.textContent = draft.picked.size ? tn("{count} picked. The more varied the subjects and colors, the better.", "{count} picked. The more varied the subjects and colors, the better.", draft.picked.size) : "";
     const done = [...$("panel-actions").querySelectorAll(".button.success")].pop();
     if (done) done.disabled = !draft.picked.size;
   }
   if (kind() === "generate" && view().candidates.length && count) {
     const [picked] = [...draft.picked];
-    count.textContent = picked ? `${pad(picked)}번을 바탕으로 고쳐요` : "고르지 않으면 새로 그려요";
+    count.textContent = picked ? t("Changing number {number}", { number: pad(picked) }) : t("Nothing picked draws a new one");
   }
 }
 
 async function submit(decision, reason = "") {
-  const buttons = [...$("panel-actions").querySelectorAll("button")];
+  const buttons = [...$("panel-actions").querySelectorAll("button"), ...$("dock").querySelectorAll("button")];
   buttons.forEach(node => { node.disabled = true; });
   const talking = ["discover", "confirm"].includes(kind());
   try {
@@ -766,10 +851,20 @@ async function submit(decision, reason = "") {
 function renderStage() {
   const current = view();
   const stage = $("stage-inner");
+  const place = data.session ? `${data.style}|${data.session.id}` : null;
+  if (appeared.place !== place) appeared = { place, keys: new Set(), primed: false };
   if (!data.session) return fill(stage, ...overviewStage());
-  if (!current) return fill(stage, workingNote("준비하고 있어요"));
+  if (!current) return fill(stage, workingNote(t("Getting ready")));
   const stages = { discover: discoverStage, sample: boardStage, confirm: confirmStage, generate: boardStage, model: boardStage };
   fill(stage, ...stages[current.kind](current));
+  appeared.primed = true;
+}
+
+// " enter" for a thing the stage shows for the first time since the session opened, so it comes in with a motion.
+function entering(key) {
+  const fresh = !appeared.keys.has(key);
+  appeared.keys.add(key);
+  return fresh && appeared.primed ? " enter" : "";
 }
 
 function overviewStage() {
@@ -777,7 +872,7 @@ function overviewStage() {
   const references = overview.references.map(path => ({ path, name: `${data.style}-${fileName(path)}`, info: [] }));
   const made = [...data.archive].reverse();
   const madeItems = made.map(item => lightboxFromArchive({ ...item, style: data.style }));
-  const addTile = h("label", { class: "add-tile", title: "이미지를 올려 레퍼런스에 추가" }, [h("span", { html: icon("plus") }), h("small", { text: "레퍼런스 추가" })]);
+  const addTile = h("label", { class: "add-tile", title: t("Upload images to add to references") }, [h("span", { html: icon("plus") }), h("small", { text: t("Add reference") })]);
   const upload = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", multiple: true });
   upload.addEventListener("change", async () => {
     for (const file of upload.files) {
@@ -789,22 +884,22 @@ function overviewStage() {
   });
   addTile.append(upload);
   return [
-    sectionTitle("레퍼런스", `${references.length}장`),
+    sectionTitle(t("References"), tn("{count} image", "{count} images", references.length)),
     h("div", { class: "grid compact" }, [
       ...references.map((item, index) => imageFrame(item.path, {
         fit: "fill", lazy: false, onClick: () => openLightbox(references, index),
-        tools: [tool("close", "레퍼런스에서 빼기", () => removeReference(item.path))]
+        tools: [tool("close", t("Remove from references"), () => removeReference(item.path))]
       })),
       addTile
     ]),
-    sectionTitle("최근 만든 이미지", made.length ? h("a", { href: `#/archive/${encodeURIComponent(data.style)}`, text: "보관함에서 보기" }) : null),
+    sectionTitle(t("Recent images"), made.length ? h("a", { href: `#/archive/${encodeURIComponent(data.style)}`, text: t("See in the archive") }) : null),
     made.length ? h("div", { class: "grid compact" }, made.slice(0, 18).map((item, index) => imageFrame(item.file, {
       fit: "fill", onClick: () => openLightbox(madeItems, index),
       tools: [
-        tool("reference", "레퍼런스에 추가", () => addToReferences(data.style, item.file)),
-        tool("download", "다운로드", null, { href: fileUrl(item.file), download: `${data.style}-${fileName(item.file)}` })
+        tool("reference", t("Add to references"), () => addToReferences(data.style, item.file)),
+        tool("download", t("Download"), null, { href: fileUrl(item.file), download: `${data.style}-${fileName(item.file)}` })
       ]
-    }))) : emptyState({ text: "아직 만든 이미지가 없어요. 왼쪽에서 새 이미지나 새 아이데이션으로 시작하세요." })
+    }))) : emptyState({ text: t("No images yet. Start with New image or New ideation on the left.") })
   ];
 }
 
@@ -815,17 +910,17 @@ function lightboxItems(candidates) {
     path: candidate.path,
     name: `${data.style}-${fileName(candidate.path)}`,
     add: adds ? { style: data.style, path: candidate.path } : null,
-    info: [["요청", candidate.request], ["에이전트 메모", candidate.description], ["내 메모", candidate.note], ["검수", candidate.review], ["모델", candidate.model && `${shortModel(candidate.model)}${candidate.cost != null ? ` · ${money(candidate.cost)}` : ""}`], ["프롬프트", candidate.prompt, true]]
+    info: [[t("Request"), candidate.request], [t("Agent's note"), candidate.description], [t("My note"), candidate.note], [t("Review"), candidate.review], madeWith(candidate), [t("Prompt"), candidate.prompt, true]]
   }));
 }
 
-function messageNode(who, children) {
-  return h("div", { class: `message ${who}` }, [h("div", { class: "avatar", text: who === "user" ? "나" : "AS" }), h("div", { class: "message-body" }, children)]);
+function messageNode(who, children, key = null) {
+  return h("div", { class: `message ${who}${key ? entering(key) : ""}` }, [h("div", { class: "avatar", text: who === "user" ? t("Me") : "AS" }), h("div", { class: "message-body" }, children)]);
 }
 
 function thumbRow(candidates) {
   const items = lightboxItems(candidates);
-  return h("div", { class: "thumbs" }, candidates.map((candidate, index) => thumb(candidate.path, { picked: candidate.picked, title: candidate.description || "크게 보기", onClick: () => openLightbox(items, index) })));
+  return h("div", { class: "thumbs" }, candidates.map((candidate, index) => thumb(candidate.path, { picked: candidate.picked, title: candidate.description || t("Enlarge"), onClick: () => openLightbox(items, index) })));
 }
 
 // What the user said about the images of a turn: each picked or noted image with its number, the pick, and the note.
@@ -836,7 +931,7 @@ function answerMarks(candidates) {
   return h("div", { class: "marks" }, marked.map((candidate, index) => h("div", { class: "mark" }, [
     thumb(candidate.path, { small: true, picked: candidate.picked, onClick: () => openLightbox(items, index) }),
     h("div", {}, [
-      h("span", { class: "mark-head" }, [`${pad(candidate.number)}번`, candidate.picked ? pill("고름", { tone: "accent", small: true }) : null]),
+      h("span", { class: "mark-head" }, [t("No. {number}", { number: pad(candidate.number) }), candidate.picked ? pill(t("Picked"), { tone: "accent", small: true }) : null]),
       candidate.note ? h("span", { class: "mark-note", text: candidate.note }) : null
     ])
   ])));
@@ -853,20 +948,20 @@ function discoverStage(current) {
     // A visit to a board names what it drew since the last visit; one that drew nothing new shows the board's own question.
     const requests = [...new Set(fresh.map(candidate => candidate.request).filter(Boolean))];
     const visit = turn.kind !== "discover" && fresh.length > 0;
-    const text = visit ? [`${KIND_NAMES[turn.kind]}에서 그린 것`, ...requests.map(request => `· ${request}`)].join("\n") : turn.message;
+    const text = visit ? [t("Drawn in {kind}", { kind: KIND_NAMES[turn.kind] }), ...requests.map(request => `· ${request}`)].join("\n") : turn.message;
     const agentChildren = [text ? h("div", { class: `bubble${visit ? " stage-visit" : ""}`, text }) : null];
     if (!isCurrent && fresh.length) agentChildren.push(thumbRow(fresh));
-    if (agentChildren.some(Boolean)) nodes.push(messageNode("agent", agentChildren));
+    if (agentChildren.some(Boolean)) nodes.push(messageNode("agent", agentChildren, `agent|${turn.round}`));
     if (isCurrent && current.candidates.length) nodes.push(candidateGrid(current.candidates));
     const answered = turn.reply != null || turn.decision != null;
     const marks = answered ? answerMarks(turn.candidates) : null;
     if (turn.reply || turn.attachments.length || marks) {
       const attachments = turn.attachments.map(path => ({ path, info: [] }));
-      nodes.push(messageNode("user", [turn.reply ? h("div", { class: "bubble", text: turn.reply }) : null, marks, turn.attachments.length ? h("div", { class: "thumbs" }, turn.attachments.map((path, index) => thumb(path, { onClick: () => openLightbox(attachments, index) }))) : null]));
+      nodes.push(messageNode("user", [turn.reply ? h("div", { class: "bubble", text: turn.reply }) : null, marks, turn.attachments.length ? h("div", { class: "thumbs" }, turn.attachments.map((path, index) => thumb(path, { onClick: () => openLightbox(attachments, index) }))) : null], `user|${turn.round}`));
     }
   }
   const waiting = waitingText(current);
-  if (waiting) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), waiting])]));
+  if (waiting) nodes.push(messageNode("agent", [h("div", { class: "bubble working" }, [h("span", { class: "spinner" }), waiting])], `waiting|${current.round}`));
   return [h("div", { class: "thread" }, nodes)];
 }
 
@@ -874,7 +969,7 @@ function waitingText(current) {
   if (!current.feedback) return "";
   const decision = current.feedback.decision;
   if (DRAWING.includes(decision)) return "";
-  return WAITING[decision] || CONTINUING[current.kind] || "다음 화면을 준비하고 있어요";
+  return WAITING[decision] || CONTINUING[current.kind] || t("Preparing the next step");
 }
 
 function candidateGrid(candidates, { flush = false } = {}) {
@@ -882,24 +977,25 @@ function candidateGrid(candidates, { flush = false } = {}) {
   return h("div", { class: `candidates${flush ? " flush" : ""}` }, candidates.map((candidate, index) => candidateCard(candidate, index, items)));
 }
 
+// Picks and notes show on the cards while the answer is being written; once sent, the answer's message shows them.
 function candidateCard(candidate, index, items) {
-  const isPicked = answering() ? draft.picked.has(candidate.number) : candidate.picked;
-  const note = answering() ? draft.notes[candidate.number] || "" : candidate.note || "";
-  const memo = selectable() && kind() !== "confirm" ? tool("memo", note || "메모", () => editNote(candidate), { on: Boolean(note) }) : null;
-  return h("div", { class: `candidate${selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}`, "data-number": candidate.number }, [
+  const isPicked = answering() && draft.picked.has(candidate.number);
+  const note = answering() ? draft.notes[candidate.number] || "" : "";
+  const memo = selectable() && kind() !== "confirm" ? tool("memo", note || t("Note"), () => editNote(candidate), { on: Boolean(note) }) : null;
+  return h("div", { class: `candidate${selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}${entering(candidate.path)}`, "data-number": candidate.number }, [
     imageFrame(candidate.path, {
       number: candidate.number, check: selectable(),
       onClick: () => selectable() ? togglePick(candidate.number) : openLightbox(items, index),
-      tools: [memo, tool("zoom", "크게 보기", () => openLightbox(items, index))]
+      tools: [memo, tool("zoom", t("Enlarge"), () => openLightbox(items, index))]
     }),
     candidate.description ? h("div", { class: "label", text: candidate.description }) : null,
-    note ? field("내 메모", note) : null
+    note ? field(t("My note"), note) : null
   ]);
 }
 
 // A note travels with the answer whether or not the image is picked: a reason to pick, or what falls short.
 async function editNote(candidate) {
-  const text = await ask({ title: `${pad(candidate.number)}번 메모`, description: "좋은 점이나 아쉬운 점을 적어 주세요. 고르지 않은 이미지에도 남길 수 있어요.", value: draft.notes[candidate.number] || "", placeholder: "예: 그림자가 부드러워서 좋아요", confirm: "저장" });
+  const text = await ask({ title: t("Note on No. {number}", { number: pad(candidate.number) }), description: t("Write what works or what falls short. Images you do not pick can have notes too."), value: draft.notes[candidate.number] || "", placeholder: t("e.g. I like the soft shadow"), confirm: t("Save") });
   if (text == null) return;
   if (text) draft.notes[candidate.number] = text;
   else delete draft.notes[candidate.number];
@@ -916,6 +1012,7 @@ function togglePick(number) {
   else draft.picked.delete(number);
   document.querySelectorAll("[data-number]").forEach(node => node.classList.toggle("picked", draft.picked.has(Number(node.dataset.number))));
   syncSelection();
+  syncComposerImages();
   syncSend();
 }
 
@@ -924,61 +1021,75 @@ function confirmStage(current) {
   return [
     current.note ? messageNode("agent", [h("div", { class: "bubble", text: current.note })]) : null,
     h("div", { style: "height: 20px" }),
-    sectionTitle("레퍼런스 후보", `${current.candidates.length}장`),
+    sectionTitle(t("Reference candidates"), tn("{count} image", "{count} images", current.candidates.length)),
     candidateGrid(current.candidates, { flush: true }),
     waiting ? h("div", { style: "margin-top: 20px" }, [workingNote(waiting)]) : null
   ];
 }
 
-// Boards list images in the order they were drawn, the one being drawn last.
+// A request on the board, with the attempt it was drawn from when the user picked one.
+function requestField(request, from, ordered) {
+  const base = from && ordered.find(candidate => candidate.path === from);
+  return h("div", { class: "entry-request" }, [
+    field(t("Request"), request || "-", { strong: true }),
+    base ? h("button", { class: "from", type: "button", title: t("Enlarge"), onclick: () => openLightbox(lightboxItems([base]), 0) }, [h("img", { src: fileUrl(base.path), alt: "" }), h("span", { text: t("From No. {number}", { number: pad(base.number) }) })]) : null
+  ]);
+}
+
+// Boards list images in the order they were drawn, the one being drawn last. Each card keeps its request on top,
+// what the agent has to say under it, scrolling when long, and opens the prompt on demand.
 function boardStage(current) {
   const ordered = current.candidates;
   const items = lightboxItems(ordered);
   const isGenerate = current.kind === "generate";
   const adds = data.overview.confirmed;
   const entries = ordered.map((candidate, index) => {
-    const isPicked = answering() ? draft.picked.has(candidate.number) : candidate.picked;
-    const facts = [candidate.model ? shortModel(candidate.model) : null, candidate.cost != null ? money(candidate.cost) : null].filter(Boolean).join(" · ");
-    return h("article", { class: `entry${isGenerate && selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}`, "data-number": candidate.number }, [
+    const isPicked = answering() && draft.picked.has(candidate.number);
+    const facts = candidate.tool ? TOOL_NAMES[candidate.tool] : [candidate.model ? shortModel(candidate.model) : null, candidate.cost != null ? money(candidate.cost) : null].filter(Boolean).join(" · ");
+    return h("article", { class: `entry${isGenerate && selectable() ? " selectable" : ""}${isPicked ? " picked" : ""}${entering(candidate.path)}`, "data-number": candidate.number }, [
       imageFrame(candidate.path, {
         number: candidate.number, check: isGenerate && selectable(),
         onClick: () => isGenerate && selectable() ? togglePick(candidate.number) : openLightbox(items, index),
         tools: [
-          tool("zoom", "크게 보기", () => openLightbox(items, index)),
-          adds ? tool("reference", "레퍼런스에 추가", () => addToReferences(data.style, candidate.path)) : null,
-          tool("download", "다운로드", null, { href: fileUrl(candidate.path), download: `${data.style}-${fileName(candidate.path)}` })
+          tool("zoom", t("Enlarge"), () => openLightbox(items, index)),
+          adds ? tool("reference", t("Add to references"), () => addToReferences(data.style, candidate.path)) : null,
+          tool("download", t("Download"), null, { href: fileUrl(candidate.path), download: `${data.style}-${fileName(candidate.path)}` })
         ]
       }),
       h("div", { class: "entry-info" }, [
-        field("요청", candidate.request || "-", { strong: true }),
-        candidate.description ? field("에이전트 메모", candidate.description) : null,
-        candidate.review ? field("검수", candidate.review) : null,
-        candidate.prompt ? field("프롬프트", candidate.prompt, { mono: true, grows: true }) : null,
-        facts ? h("span", { class: "meta", text: facts }) : null
+        requestField(candidate.request, candidate.refined_from, ordered),
+        h("div", { class: "entry-notes" }, [
+          candidate.description ? field(t("Agent's note"), candidate.description) : null,
+          candidate.review ? field(t("Review"), candidate.review) : null
+        ]),
+        h("div", { class: "entry-foot" }, [
+          h("span", { class: "meta", text: facts }),
+          candidate.prompt ? button(t("Prompt"), { small: true, variant: "ghost", iconName: "text", onClick: () => ask({ title: t("Prompt"), description: candidate.request || "", text: candidate.prompt, confirm: t("Close") }) }) : null
+        ])
       ])
     ]);
   });
 
   const decision = current.feedback && current.feedback.decision;
   if (DRAWING.includes(decision)) {
-    entries.push(h("article", { class: "entry" }, [
-      h("div", { class: "pending-frame" }, [h("span", { class: "spinner" }), "그리는 중"]),
-      h("div", { class: "entry-info" }, [field("요청", current.feedback.request, { strong: true })])
+    entries.push(h("article", { class: `entry${entering(`pending|${current.round}`)}` }, [
+      h("div", { class: "pending-frame" }, [h("span", { class: "spinner" }), t("Drawing")]),
+      h("div", { class: "entry-info" }, [requestField(current.feedback.request, current.feedback.picked[0], ordered)])
     ]));
   }
 
   const references = current.references.length ? [
-    sectionTitle("레퍼런스", `${current.references.length}장`),
+    sectionTitle(t("References"), tn("{count} image", "{count} images", current.references.length)),
     h("div", { class: "thumbs" }, current.references.map((path, index, all) => thumb(path, { onClick: () => openLightbox(all.map(reference => ({ path: reference, info: [] })), index) }))),
     h("div", { style: "height: 24px" })
   ] : [];
   const waiting = waitingText(current);
-  const title = { generate: "만든 이미지", sample: "샘플", model: `${shortModel(current.model)}로 그린 것` }[current.kind];
+  const title = { generate: t("Images made"), sample: t("Sample"), model: t("Drawn with {model}", { model: shortModel(current.model) }) }[current.kind];
 
   return [
     ...references,
-    sectionTitle(title, ordered.length ? `${ordered.length}장` : ""),
-    entries.length ? h("div", { class: "entries" }, entries) : emptyState({ text: isGenerate ? "왼쪽에 만들고 싶은 것을 적어 주세요." : "왼쪽에 그려 볼 것을 적어 주세요." }),
+    sectionTitle(title, ordered.length ? tn("{count} image", "{count} images", ordered.length) : ""),
+    entries.length ? h("div", { class: "entries" }, entries) : emptyState({ text: isGenerate ? t("Write what you want to make below.") : t("Write what to draw below.") }),
     waiting ? h("div", { style: "margin-top: 20px" }, [workingNote(waiting)]) : null
   ];
 }

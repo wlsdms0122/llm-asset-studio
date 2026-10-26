@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Run the engine and the studio server end to end in a throwaway workspace, generating nothing and spending nothing.
 
-Makes a style through its whole life (make session, discover, sample, confirm), opens generate and model
-sessions, talks a generate session into a brief, curates references, switches and removes models, renames and deletes, asks the server for
+Checks that every text on screen has its Korean, then makes a style through its whole life (make session, discover, sample, confirm), opens generate and model
+sessions, removes a background, talks a generate session into a brief, curates references, switches and removes models, renames and deletes, asks the server for
 every page's state, and stores a key. Exits 0 when everything holds, 1 with the failed checks otherwise.
 """
 
+import base64
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -18,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 import zlib
+from urllib.parse import quote
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent / "engine"
@@ -36,6 +39,14 @@ def png(path, color):
     raw = b"".join(b"\x00" + bytes(color) * width for _ in range(height))
     chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def disc(path):
+    """A red disc on a light background: a subject Vision can lift."""
+    size = 128
+    rows = b"".join(b"\x00" + b"".join(bytes((220, 60, 60) if (x - 64) ** 2 + (y - 64) ** 2 < 35 ** 2 else (245, 245, 245)) for x in range(size)) for y in range(size))
+    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
 def inside(workspace):
@@ -72,6 +83,7 @@ def lifecycle(workspace):
     make = next((workspace / "sessions" / "demo").iterdir()).name
     session = f"sessions/demo/{make}"
     engine(workspace, "session.py", "answer", session, "--comment", "warm")
+    check("watch hands over a session the user answered", engine(workspace, "session.py", "watch").stdout.split() == [session])
     (workspace / "styles/demo/style.md").write_text("# demo\n\nA test style.\n")
     round_directory = draw(workspace, "demo", make, "discover", [(200, 40, 40), (40, 40, 200)])
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "discover", "--describe", "one", "--describe", "two")
@@ -92,6 +104,26 @@ def lifecycle(workspace):
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "generate")
     archive = (workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()
     check("generate images are archived", any(json.loads(line)["kind"] == "generate" for line in archive))
+    check("a board does not go to ideation", engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--comment", "talk", "--decision", "discover", ok=False).returncode != 0)
+    engine(workspace, "session.py", "answer", f"sessions/demo/{generate}", "--picked", "1", "--request", "a bigger cup", "--decision", "refine")
+    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", generate, "generate", [(200, 200, 60)])), "--kind", "generate")
+    board = json.loads(engine(workspace, "session.py", "show", f"sessions/demo/{generate}").stdout)["candidates"]
+    check("a refined image names the attempt it was drawn from", board[0]["refined_from"] is None and board[1]["refined_from"] == board[0]["path"])
+    engine(workspace, "session.py", "rename", f"sessions/demo/{generate}", "  the  cup ")
+    check("a session keeps the name the user gave it", json.loads((workspace / f"sessions/demo/{generate}/session.json").read_text())["name"] == "the cup")
+
+    if sys.platform == "darwin" and shutil.which("swift"):
+        subject = workspace / "subject.png"
+        disc(subject)
+        result = engine(workspace, "cutout.py", f"sessions/demo/{generate}", str(subject), "--request", "no background", ok=False)
+        outputs = json.loads(result.stdout or "{}").get("outputs") or []
+        # PNG color type 6 is RGBA.
+        check("cutout writes the subject into the next round with transparency", result.returncode == 0 and len(outputs) == 1 and (workspace / outputs[0]).read_bytes()[25] == 6)
+        if outputs:
+            engine(workspace, "session.py", "publish", str((workspace / outputs[0]).parent), "--kind", "generate")
+            check("a cutout is archived with its tool", json.loads((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()[-1]).get("tool") == "cutout")
+    else:
+        print("skip cutout, which needs macOS and Swift")
 
     image = next(round_directory.glob("*.png"))
     engine(workspace, "style.py", "reference-add", "styles/demo", str(image))
@@ -116,29 +148,27 @@ def lifecycle(workspace):
 
 
 def image_talk(workspace):
-    """A generate session that talks first: the user goes to the talk, the agent writes brief.md, and the board draws from it."""
-    talk = Path(engine(workspace, "session.py", "open", "styles/demo", "generate").stdout.strip())
+    """An ideation session: the agent works out the image in conversation, writes brief.md, and draws it there with the style."""
+    talk = Path(engine(workspace, "session.py", "open", "styles/demo", "ideation").stdout.strip())
     session = f"sessions/demo/{talk.name}"
     archived = len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines())
-    engine(workspace, "session.py", "answer", session, "--decision", "discover", "--comment", "an icon, no idea what to draw")
+    engine(workspace, "session.py", "answer", session, "--comment", "an icon, no idea what to draw")
     round_directory = draw(workspace, "demo", talk.name, "discover", [(250, 200, 0), (0, 120, 250)])
     engine(workspace, "session.py", "publish", str(round_directory), "--kind", "discover", "--note", "which idea?", "--describe", "a sun", "--describe", "a drop")
     check("talk candidates are not archived", len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()) == archived)
-    check("a generate session's talk does not go to sample", engine(workspace, "session.py", "answer", session, "--decision", "sample", ok=False).returncode != 0)
+    check("ideation does not go to sample", engine(workspace, "session.py", "answer", session, "--decision", "sample", ok=False).returncode != 0)
     check("drawing waits for a brief", engine(workspace, "session.py", "answer", session, "--picked", "1", "--decision", "generate", ok=False).returncode != 0)
     engine(workspace, "session.py", "answer", session, "--picked", "1", "--comment", "the sun")
     (talk / "brief.md").write_text("# A sun icon\n\nUse: an app icon.\n")
     engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "discover", "--note", "a sun, centered")
+    check("ideation holds no board", engine(workspace, "session.py", "publish", engine(workspace, "session.py", "next", session).stdout.strip(), "--kind", "generate", ok=False).returncode != 0)
     engine(workspace, "session.py", "answer", session, "--decision", "generate")
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "generate", [(250, 220, 0)], "other/model")), "--kind", "generate")
-    board = json.loads(engine(workspace, "session.py", "show", session).stdout)
-    check("the board draws from the brief", board["kind"] == "generate" and board["brief"].startswith("# A sun icon") and len(board["candidates"]) == 1)
-    engine(workspace, "session.py", "answer", session, "--decision", "discover", "--comment", "a smaller sun")
     archived = len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines())
-    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "discover", [(250, 240, 0)], "other/model")), "--kind", "discover", "--note", "smaller, then")
+    engine(workspace, "session.py", "publish", str(draw(workspace, "demo", talk.name, "discover", [(250, 220, 0)], "other/model")), "--kind", "discover", "--note", "drawn from the brief")
+    drawn = json.loads(engine(workspace, "session.py", "show", session).stdout)
+    check("ideation draws from the brief in the conversation", drawn["kind"] == "discover" and drawn["brief"].startswith("# A sun icon") and len(drawn["candidates"]) == 1)
     check("a talk candidate drawn with the style is archived", len((workspace / "styles/demo/archive/index.jsonl").read_text().splitlines()) == archived + 1)
-    thread = json.loads(engine(workspace, "session.py", "show", session).stdout)["thread"]
-    check("the talk shows the board's question and what the board drew", [turn["kind"] for turn in thread] == ["generate", "discover", "discover", "generate", "discover"] and thread[0]["message"] and len(thread[3]["candidates"]) == 1)
+    check("the talk keeps every turn", [turn["kind"] for turn in drawn["thread"]] == ["discover"] * 4 and drawn["thread"][0]["message"])
 
 
 def key(workspace):
@@ -187,20 +217,43 @@ def server(workspace, generate):
         check("a foreign host is refused", get("/api/styles", {"Host": "example.com"})[0] == 403)
         check("a plain text post is refused", post("/api/styles/delete", {"style": "demo"}, "text/plain")[0] == 415)
         status, body = post("/api/sessions", {"style": "demo", "kind": "generate"})
+        png(workspace / "upload.png", (10, 200, 10))
+        status_attached, attached = post("/api/attach", {"style": "demo", "session": body["session"], "name": "스크린샷 2026-10-22 오전 1.02.03.png", "data": base64.b64encode((workspace / "upload.png").read_bytes()).decode()})
+        check("an image with a Korean name is attached as a png", status_attached == 200 and attached["path"].endswith(".png"))
         check("opens a generate session", status == 200 and (workspace / "sessions/demo" / body["session"]).is_dir())
-        status, opened = post("/api/sessions", {"style": "demo", "kind": "generate", "ideation": True})
+        status, opened = post("/api/sessions", {"style": "demo", "kind": "ideation"})
         state = json.loads(get(f"/api/state?style=demo&session={opened.get('session')}")[1])
-        check("opens a generate session in ideation", status == 200 and state["view"]["kind"] == "discover" and state["session"]["ideation"])
-        check("a session that only drew is not an ideation", not next(session for session in state["sessions"] if session["id"] == body["session"])["ideation"])
+        check("opens an ideation session", status == 200 and state["view"]["kind"] == "discover" and state["session"]["kind"] == "ideation")
+        check("renames a session", post("/api/sessions/rename", {"style": "demo", "session": body["session"], "name": "mugs"})[0] == 200 and next(session for session in json.loads(get("/api/state?style=demo")[1])["sessions"] if session["id"] == body["session"])["title"] == "mugs")
+        check("an empty session name is refused", post("/api/sessions/rename", {"style": "demo", "session": body["session"], "name": " "})[0] == 400)
         check("deletes a session", post("/api/sessions/delete", {"style": "demo", "session": body["session"]})[0] == 200)
-        check("renames a style", post("/api/styles/rename", {"style": "demo", "name": "demo-two"})[0] == 200 and (workspace / "styles/demo-two/style.md").read_text().startswith("# demo-two"))
-        check("deletes a style", post("/api/styles/delete", {"style": "demo-two"})[0] == 200 and not (workspace / "styles/demo-two").exists() and not (workspace / "sessions/demo-two").exists())
+        check("a name with capitals is refused", post("/api/styles/rename", {"style": "demo", "name": "Demo"})[0] == 400)
+        check("renames a style, to a Korean name", post("/api/styles/rename", {"style": "demo", "name": "데모-둘"})[0] == 200 and (workspace / "styles/데모-둘/style.md").read_text().startswith("# 데모-둘"))
+        check("a Korean-named style's state", get(f"/api/state?style={quote('데모-둘')}")[0] == 200)
+        check("deletes a style", post("/api/styles/delete", {"style": "데모-둘"})[0] == 200 and not (workspace / "styles/데모-둘").exists() and not (workspace / "sessions/데모-둘").exists())
     finally:
         process.terminate()
         process.wait()
 
 
+def words():
+    """Every text the studio shows is looked up in i18n.js, so each must have its Korean there."""
+    web = ENGINE.parent / "web"
+    korean = set(re.findall(r'^  ("(?:[^"\\]|\\.)*"): ', (web / "i18n.js").read_text(), re.M))
+    shown = set()
+    for name in ("app.js", "ui.js"):
+        source = (web / name).read_text()
+        shown.update(re.findall(r'\bt\(("(?:[^"\\]|\\.)*")', source))
+        for singular, plural in re.findall(r'\btn\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")', source):
+            shown.update((singular, plural))
+    page = (web / "index.html").read_text()
+    shown.update(json.dumps(text, ensure_ascii=False) for text in re.findall(r"data-t>([^<]+)<", page) + re.findall(r'title="([^"]+)"[^>]*data-t-title', page))
+    missing = sorted(shown - korean)
+    check("every text on screen has its Korean" + (f" (missing {', '.join(missing)})" if missing else ""), not missing)
+
+
 def main():
+    words()
     workspace = Path(tempfile.mkdtemp(prefix="asset-studio-verify-")).resolve()
     try:
         (workspace / "styles").mkdir()
